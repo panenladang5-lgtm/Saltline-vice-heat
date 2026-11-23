@@ -539,5 +539,458 @@ function run(sim, seconds, input) { const n = Math.round(seconds * 60); for (let
   ok(maxAhead > 5, `interceptor: its target sits ahead of the player's line (best ${maxAhead.toFixed(1)})`);
 }
 
+// ================= ROUND 5 — the played game, not only the sim =============
+// The round-4 suite passed 677 while the shipped game had a dead dialogue
+// system, an unreachable boat leg and a contract that completed at the
+// wrong address: it tested the sim's data, not the paths a player walks.
+// These blocks drive the real mechanics — real ui.js, real walking, real
+// firing, and one full story playthrough.
+function mkSimBoats() { const s = mkSim(); s.setBoats(D.BOATS.map(b => ({ x: b.x, z: b.z, ang: b.ang, speed: 0 }))); return s; }
+function clearWanted(S) { const w = S.wanted; w.ledger = 0; w.points = 0; w.episode = false; w.search = 1; w.seen = false; w.heatFloor = 0; w.report = null; w.minorCount = 0; }
+
+// ---- round 5: refuel no longer throws (F2) ----
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const car = S.cars[0];
+  car.x = -51; car.z = 13; car.ang = 0; car.speed = 0; car.fuel = 40;
+  p.mode = 'car'; p.carId = 0; p.x = -51; p.z = 13; p.money = 300;
+  let threw = false;
+  try { sim.step(1 / 60, IN({ interactPressed: true })); } catch (e) { threw = true; }
+  ok(!threw, 'refuel: the station interact does not throw (F2)');
+  eq(car.fuel, 100, 'refuel: the tank fills');
+  eq(p.money, 240, 'refuel: 60 units at $1 are charged');
+}
+
+// ---- round 5: walk the pier, board the boat — no teleport (F4) ----
+{
+  const sim = mkSimBoats(); const S = sim.S; const p = S.player;
+  p.x = 205; p.z = 42; p.mode = 'foot'; p.carId = -1;
+  let maxX = -1e9, boarded = false;
+  for (let i = 0; i < 60 * 25 && !boarded; i++) {
+    const nearBoat = S.boats.some(b => (b.x - p.x) ** 2 + (b.z - p.z) ** 2 < 50);
+    sim.step(1 / 60, IN({ moveX: 1, sprint: true, enterPressed: nearBoat }));
+    if (p.x > maxX) maxX = p.x;
+    if (p.mode === 'boat') boarded = true;
+  }
+  ok(maxX > 230, `pier walk: on foot the player passes the old 222 waterline (reached x=${maxX.toFixed(1)}) (F4)`);
+  ok(boarded, 'pier walk: walking the pier boards a boat through the real enter path (F4)');
+}
+
+// ---- round 5: the title screen cannot wipe a save (F21) ----
+{
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: k => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, String(v)); },
+    removeItem: k => { store.delete(k); },
+  };
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  // an existing save from a previous session, written in the game's format
+  p.money = 777;
+  S.sessionLive = true; // write it the way a live session would
+  sim.saveGame();
+  S.sessionLive = false;
+  const before = store.get(D.SAVE_KEY);
+  ok(typeof before === 'string' && JSON.parse(before).player.money === 777, 'save gate: fixture save written (777)');
+  // title screen: a fresh default sim state sits over the save, then unload
+  p.money = 300;
+  sim.saveGame();
+  eq(store.get(D.SAVE_KEY), before, 'save gate: unload at the title leaves the existing save untouched (F21)');
+  // once play actually starts, saving works again
+  sim.beginSession();
+  p.money = 555;
+  sim.saveGame();
+  eq(JSON.parse(store.get(D.SAVE_KEY)).player.money, 555, 'save gate: after beginSession the save writes normally (F21)');
+  delete globalThis.localStorage;
+}
+
+// ---- round 5: respawn never takes cash below zero (F18) ----
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  p.money = 30; p.dead = true;
+  sim.respawn();
+  eq(p.money, 0, 'respawn: the clinic takes what you carry, never more (F18)');
+  eq(p.hp, 100, 'respawn: back on your feet at full health');
+}
+
+// ---- round 5: taking a hit flashes (F19, sim half) ----
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const n0 = S.events.length;
+  sim.hurtPlayer(20);
+  ok(p.hp < 100, 'hit feedback: the damage lands');
+  ok(S.events.slice(n0).some(e => e.k === 'hitflash'), 'hit feedback: a landed hit emits the flash event (F19)');
+}
+
+// ---- round 5: a car towed in dry comes back with a rescue tank (F7) ----
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const car = S.cars[0];
+  car.x = -185; car.z = -60; car.disabled = true; car.hp = 10; car.fuel = 0; car._fuelOut = true; car.parked = false;
+  p.x = 60; p.z = 60; p.mode = 'foot'; // the owner is across town
+  run(sim, 75, IN());
+  eq(car.fuel, 50, 'tow rescue: the depot returns the dry car with 50 fuel (F7)');
+  eq(car.disabled, false, 'tow rescue: the car runs again');
+  ok(car.x === -170 && car.z === -45, 'tow rescue: the car waits at the depot yard');
+  eq(car._fuelOut, false, 'tow rescue: the dry flag is cleared');
+}
+
+// ---- round 5: the Coast Run pays for records, not laps (F15) ----
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const car = S.cars[0];
+  const runCoast = (idleSeconds) => {
+    // the trial starts from the driver's seat, like the races
+    p.mode = 'car'; p.carId = 0; car.x = D.SITES.trial.x; car.z = D.SITES.trial.z; car.speed = 0; p.x = car.x; p.z = car.z;
+    sim.step(1 / 60, IN({ interactPressed: true }));
+    const gs = D.COAST_RUN.gates;
+    for (let i = 0; i < gs.length - 1; i++) { car.x = gs[i].x; car.z = gs[i].z; car.speed = 0; p.x = gs[i].x; p.z = gs[i].z; run(sim, 0.25, IN()); }
+    if (idleSeconds) run(sim, idleSeconds, IN());
+    const last = gs[gs.length - 1];
+    car.x = last.x; car.z = last.z; car.speed = 0; p.x = last.x; p.z = last.z;
+    run(sim, 0.25, IN());
+  };
+  const m0 = p.money;
+  runCoast(0);
+  eq(p.money, m0 + 350, 'coast: a first run takes the $350 record prize');
+  ok(S.coastBest > 0, 'coast: the best time is recorded');
+  const best1 = S.coastBest;
+  runCoast(6);
+  eq(p.money, m0 + 350, 'coast: a slower run pays nothing (F15)');
+  eq(S.coastBest, best1, 'coast: the best time stands');
+  eq(S.coast, null, 'coast: the run is closed');
+}
+
+// ---- round 5: races and the Coast Run die when the driver walks off (F6) ----
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const car = S.cars[0];
+  car.x = D.RACES[0].start.x; car.z = D.RACES[0].start.z;
+  p.carId = 0; p.mode = 'car'; p.x = car.x; p.z = car.z;
+  sim.step(1 / 60, IN({ interactPressed: true }));
+  ok(!!S.race, 'abort: the race is running');
+  p.mode = 'foot'; p.carId = -1; // the driver gets out and walks away
+  run(sim, 11, IN());
+  eq(S.race, null, 'abort: eleven seconds on foot abandons the race (F6)');
+}
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const car = S.cars[0];
+  car.x = D.SITES.trial.x; car.z = D.SITES.trial.z; car.speed = 0;
+  p.mode = 'car'; p.carId = 0; p.x = car.x; p.z = car.z;
+  sim.step(1 / 60, IN({ interactPressed: true }));
+  ok(!!S.coast, 'abort: the Coast Run is running');
+  p.mode = 'foot'; p.carId = -1; // the driver gets out and walks away
+  run(sim, 11, IN());
+  eq(S.coast, null, 'abort: eleven seconds on foot abandons the Coast Run (F6)');
+}
+
+// ---- round 5: night parking happens at the curb, never in a crossing (F30) ----
+{
+  const sim = mkSim(); const S = sim.S;
+  const target = S.cars.find(c => c.driver && c.id % 10 < 3);
+  ok(!!target, 'night park: a parking-slice car exists');
+  for (const c of S.cars) if (c !== target) c.parked = true; // empty streets: only the slice car circulates
+  S.hours = 23;
+  let badStop = 0, parkedAtCurb = false;
+  for (let i = 0; i < 60 * 120; i++) {
+    sim.step(1 / 60, IN());
+    if (i % 30 !== 0) continue;
+    const alongMod = ((target.along % 64) + 64) % 64;
+    const inBox = alongMod < 7 || alongMod > 57; // the cross-road pavement itself
+    const lateral = target.axis === 'NS' ? Math.abs(target.x - D.ROADS[target.road]) : Math.abs(target.z - D.ROADS[target.road]);
+    if (Math.abs(target.speed) < 0.05 && inBox && lateral < 5) badStop++;
+    if (Math.abs(target.speed) < 0.05 && lateral > 6) parkedAtCurb = true;
+  }
+  eq(badStop, 0, 'night park: the slice car never stops inside an intersection (F30)');
+  ok(parkedAtCurb, 'night park: the slice car ends the night parked at the curb (F30)');
+}
+
+// ---- round 5: guards collide, and cannot see through walls (F31) ----
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  S.story.done = 2;
+  p.x = D.SITES.mara.x; p.z = D.SITES.mara.z; p.mode = 'foot';
+  sim.step(1 / 60, IN({ interactPressed: true }));
+  eq(S.guards.length, 3, 'guards: contract 3 fields three guards');
+  p.x = 160; p.z = 160; // behind the warehouse at (151,170) from every guard
+  run(sim, 2, IN());
+  ok(S.guards.every(g => !g.aggro), 'guards: no aggro through the warehouse wall (F31)');
+  const g = S.guards[1]; g.aggro = true;
+  let inside = false;
+  for (let i = 0; i < 60 * 20; i++) {
+    sim.step(1 / 60, IN());
+    for (const b of c1.buildings) if (Math.abs(g.x - b.x) < b.w / 2 && Math.abs(g.z - b.z) < b.d / 2) inside = true;
+    if (g.down) break;
+  }
+  ok(!inside, 'guards: an aggroed guard\u2019s path never crosses a building footprint (F31)');
+}
+
+// ---- round 5: the night heli holds you only while it can see you (F16) ----
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  S.policeCars = []; S.policeFoot = []; S.blockCars = [];
+  S.hours = 21;
+  p.x = 23; p.z = 10; p.mode = 'foot';
+  const w = S.wanted; w.ledger = 6; w.episode = true; w.search = 1; w.heatFloor = 0;
+  const h = S.helis[0]; h.mode = 'follow';
+  // control: the beam is on the player under a clear sky — the episode holds
+  for (let i = 0; i < 60 * 3; i++) { h.x = 10; h.z = 10; sim.step(1 / 60, IN()); }
+  ok(w.episode, 'heli: a clear searchlight holds the episode open');
+  // the same heli, a warehouse between it and the player: search must drain
+  let cleared = false;
+  for (let i = 0; i < 60 * 45; i++) { h.x = 23; h.z = 60; sim.step(1 / 60, IN()); if (!w.episode) { cleared = true; break; } }
+  ok(cleared, 'heli: out of the beam\u2019s sight the search drains and wanted clears at night (F16)');
+}
+
+// ---- round 5: source guards for the render-side fixes (F5, F13, F28, F11) ----
+{
+  const fs = require('node:fs');
+  const mainSrc = fs.readFileSync(new URL('../game/src/main.js', import.meta.url), 'utf8');
+  const worldSrc = fs.readFileSync(new URL('../game/src/world.js', import.meta.url), 'utf8');
+  ok(mainSrc.includes("st.kind === 'rendezvous') objPos = { x: st.x, z: st.z }"), 'marker: the rendezvous objective sits on the step\u2019s own coordinates (F5)');
+  ok(mainSrc.includes("st.kind === 'delivercar') objPos = { x: st.x, z: st.z }"), 'marker: the delivery objective sits on the step\u2019s own coordinates (F13)');
+  ok(!mainSrc.includes('fpsCount * 2'), 'pause fps: the render counter is no longer doubled (F28)');
+  ok(worldSrc.includes("'COAST RUN'") && worldSrc.includes("'RACE'"), 'signs: race starts and the Coast Run have world signs (F11)');
+}
+
+// ---- round 5: the real dialogue UI, driven headless (F1, F14, F11) ----
+{
+  class FakeCtx {
+    constructor() { this.styles = []; }
+    set fillStyle(v) { this.styles.push(v); }
+    get fillStyle() { return ''; }
+    set strokeStyle(v) { this.styles.push(v); }
+    get strokeStyle() { return ''; }
+    fillRect() {} clearRect() {} beginPath() {} closePath() {} arc() {} fill() {} stroke() {}
+    moveTo() {} lineTo() {} fillText() {} save() {} restore() {} translate() {}
+    rotate() {} scale() {} setLineDash() {} drawImage() {} rect() {} clip() {}
+    ellipse() {} quadraticCurveTo() {} bezierCurveTo() {} setTransform() {}
+    createLinearGradient() { return { addColorStop() {} }; }
+    measureText() { return { width: 10 }; }
+  }
+  class FakeEl {
+    constructor(tag) {
+      this.tagName = tag; this.children = []; this.style = {}; this.dataset = {};
+      this._text = ''; this._html = ''; this.listeners = {}; this.disabled = false; this.id = ''; this.className = '';
+      const set = new Set();
+      this.classList = { add: c => set.add(c), remove: c => set.delete(c), contains: c => set.has(c), toggle: c => (set.has(c) ? set.delete(c) : set.add(c)) };
+    }
+    appendChild(c) { this.children.push(c); return c; }
+    removeChild(c) { this.children = this.children.filter(x => x !== c); return c; }
+    get firstChild() { return this.children[0] || null; }
+    remove() {}
+    addEventListener(k, f) { (this.listeners[k] = this.listeners[k] || []).push(f); }
+    click() { (this.listeners.click || []).slice().forEach(f => f()); }
+    set textContent(v) { this._text = String(v); this._html = ''; this.children = []; }
+    get textContent() { return this._text + this._html + this.children.map(c => c.textContent).join(''); }
+    set innerHTML(v) { this._html = String(v); this._text = ''; this.children = []; }
+    get innerHTML() { return this._html; }
+    getContext() { return this._ctx || (this._ctx = new FakeCtx()); }
+    getBoundingClientRect() { return { width: 300, height: 300, left: 0, top: 0 }; }
+  }
+  const fakeDoc = { createElement: t => new FakeEl(t), head: new FakeEl('head'), body: new FakeEl('body'), addEventListener() {} };
+  const fakeWin = { addEventListener() {}, innerWidth: 1280, innerHeight: 800, devicePixelRatio: 1 };
+  globalThis.document = fakeDoc;
+  globalThis.window = fakeWin;
+  const walkEls = (rootEl, out = []) => { out.push(rootEl); for (const c of rootEl.children) walkEls(c, out); return out; };
+  const findText = (sub) => walkEls(fakeDoc.body).find(e => (e.textContent || '').includes(sub));
+  const allCtxStyles = () => { const out = []; for (const e of walkEls(fakeDoc.body)) if (e._ctx) out.push(...e._ctx.styles); return out; };
+  let ui = null, uiThrew = false;
+  try {
+    const SLU = require('../game/src/ui.js');
+    ui = SLU.createUI({ sfx() {}, objectivePos: () => null, hasSave: false, onNewGame() {}, onContinue() {}, onPause() {}, onResume() {}, onRespawn() { return true; }, onRescue() { return true; }, onSearchCut() {} });
+  } catch (e) { uiThrew = true; console.log('ui load error:', e && e.message); }
+  ok(!uiThrew && !!ui, 'dialogue UI: the real ui.js builds headless (F1)');
+  if (ui) {
+    // a full contract dialogue, from the real data, through the real card
+    let doneFlag = false, dlgThrew = false;
+    try {
+      ui.showDialogue(D.CONTRACTS[0].start, '01 / A favor in the sun — $450', () => { doneFlag = true; });
+      ok(!!findText('MARA'), 'dialogue UI: the speaker renders (MARA)');
+      ok(!!findText('Port Sol ledger is packed'), 'dialogue UI: the line renders verbatim');
+      for (let i = 0; i < 8 && !doneFlag; i++) {
+        const btn = walkEls(fakeDoc.body).find(e => e.tagName === 'button' && (e.textContent === 'NEXT' || e.textContent === 'BACK TO THE CITY'));
+        if (!btn) break;
+        btn.click();
+      }
+    } catch (e) { dlgThrew = true; console.log('dialogue error:', e && e.message); }
+    ok(!dlgThrew, 'dialogue UI: a full contract dialogue runs without throwing (F1)');
+    ok(doneFlag, 'dialogue UI: clicking through fires the completion callback');
+    // the chapter card and the completion banner ride the same fixed path
+    let cardThrew = false;
+    try {
+      ui.showChapter(D, 0);
+      ok(!!findText('CHAPTER 1'), 'dialogue UI: the chapter card renders its title');
+      ui.showComplete();
+      ok(!!findText('VICE HEAT COMPLETE'), 'dialogue UI: the completion banner renders');
+      const endS = { stats: { earned: 6500, distance: 12345, races: 2 }, story: { done: 6 }, shellsGot: new Set([1, 2, 3]), day: 2 };
+      ui.showEndCard(endS, D);
+      ok(!!findText('VICE HEAT — COMPLETE'), 'finale card: the end card renders (F29)');
+      ok(!!findText('6 / 6'), 'finale card: the end card carries the run stats (F29)');
+    } catch (e) { cardThrew = true; console.log('card error:', e && e.message); }
+    ok(!cardThrew, 'dialogue UI: chapter card, banner and end card run without throwing');
+    // the big map: honest discount percentages + the activity dots
+    const mapS = {
+      player: { x: 5, z: 15, ang: 0 }, story: { active: null, done: 0 },
+      standing: { 'OLD QUARTER': 80, 'GLASS DISTRICT': 10, 'LITTLE PALM': 10, 'CORAL HEIGHTS': 10, 'PORT SOL': 10, 'SUNSTRAND BEACH': 10 },
+      shellsGot: new Set(), taxi: { phase: 'wait', passengerOut: false, dest: 0, spot: 0 },
+      race: null, policeCars: [], policeFoot: [], helis: [], cars: [], guards: [], coastBest: 0,
+    };
+    let mapThrew = false;
+    try { ui.toggleMap(mapS, D); } catch (e) { mapThrew = true; console.log('map error:', e && e.message); }
+    ok(!mapThrew, 'big map: the panel opens headless');
+    ok(!!findText('20%'), 'big map: an 80-standing district shows its real 20% discount (F14)');
+    ok(!findText('0.2%'), 'big map: no district shows the raw fraction as a percent (F14)');
+    const styles = allCtxStyles();
+    ok(styles.includes('#ff7847'), 'big map: race starts are dotted (F11)');
+    ok(styles.includes('#53e08a'), 'big map: the Coast Run point is dotted (F11)');
+    try { ui.toggleMap(mapS, D); } catch (e) { /* closing is best-effort here */ }
+  }
+  delete globalThis.document;
+  delete globalThis.window;
+}
+
+// ---- round 5: THE PLAYTHROUGH — contracts 1→6 through real mechanics ----
+{
+  const sim = mkSimBoats(); const S = sim.S; const p = S.player;
+  const stepKind = () => { const st = S.story.currentStep(); return st ? st.kind : 'done'; };
+  const acceptNext = () => {
+    clearWanted(S);
+    p.mode = 'foot'; p.carId = -1; p.boatId = -1;
+    p.x = D.SITES.mara.x; p.z = D.SITES.mara.z;
+    sim.step(1 / 60, IN({ interactPressed: true }));
+  };
+  const killGuards = (fx, fz) => {
+    // Real aim, real line of sight, real hits. The player fights from a
+    // fixed open firing point (fx, fz) with clear lines to the guard
+    // posts — the guards aggro, walk out and trade fire, exactly as in
+    // play. Survivability is staged (armour topped up) the way the suite
+    // stages positions; the kills are not.
+    p.x = fx; p.z = fz;
+    for (const g of S.guards) {
+      // wake it first: one guard posts inside the warehouse doorway,
+      // where no line of sight reaches — step within earshot (proximity
+      // aggros through walls), then fall back to the firing point and
+      // let it walk out after you, as a player would
+      p.hp = 100; p.armour = 100; p.x = g.x; p.z = g.z + 8;
+      run(sim, 0.3, IN());
+      p.x = fx; p.z = fz;
+      let guard = 0;
+      while (!g.down && guard++ < 80) {
+        p.hp = 100; p.armour = 100; p.x = fx; p.z = fz;
+        if (p.clip <= 0) { sim.step(1 / 60, IN({ reloadPressed: true })); run(sim, 1.6, IN()); }
+        S.camYaw = Math.atan2(g.x - p.x, g.z - p.z); // aim the real gun
+        sim.step(1 / 60, IN({ fire: true }));
+        run(sim, 0.3, IN());
+      }
+    }
+  };
+  // contract 1 — the pickup-locked ledger run
+  acceptNext();
+  eq(S.story.active, 0, 'play: contract 1 accepted from Mara');
+  const pickup = S.cars.find(c => c.type === 'pickup' && c.parked);
+  ok(!!pickup, 'play: a parked pickup exists for the crate');
+  p.x = pickup.x; p.z = pickup.z;
+  sim.step(1 / 60, IN({ enterPressed: true }));
+  eq(p.mode, 'car', 'play: entered a car at the kerb');
+  ok(sim.currentCar() && sim.currentCar().type === 'pickup', 'play: it is the pickup the crate demands');
+  pickup.x = -115; pickup.z = 13; pickup.speed = 0; p.x = -115; p.z = 13;
+  run(sim, 0.3, IN());
+  eq(stepKind(), 'deliver', 'play: the crate is collected from the pickup');
+  pickup.x = 77; pickup.z = 141; p.x = 77; p.z = 141;
+  run(sim, 0.3, IN());
+  eq(S.story.done, 1, 'play: contract 1 complete');
+  // contract 2 — the coupe goes to Nico's garage, not the chop shop (F13)
+  acceptNext();
+  eq(S.story.active, 1, 'play: contract 2 accepted');
+  const coupe = S.cars.find(c => c.id === 1);
+  p.mode = 'foot'; p.carId = -1; p.x = coupe.x; p.z = coupe.z;
+  sim.step(1 / 60, IN({ enterPressed: true }));
+  eq(stepKind(), 'delivercar', 'play: taking the coupe opens the delivery');
+  coupe.x = D.SITES.chop.x; coupe.z = D.SITES.chop.z; coupe.speed = 0; p.x = coupe.x; p.z = coupe.z;
+  run(sim, 0.5, IN());
+  eq(stepKind(), 'delivercar', 'play: the chop shop does NOT complete contract 2 (F13)');
+  coupe.x = -179; coupe.z = -52; p.x = -179; p.z = -52;
+  run(sim, 0.5, IN());
+  eq(S.story.done, 2, 'play: the coupe delivered to Nico completes contract 2');
+  // contract 3 — guards, the drive, and the boat leg walked + sailed (F4)
+  acceptNext();
+  eq(S.story.active, 2, 'play: contract 3 accepted');
+  p.hp = 100; p.armour = 100;
+  killGuards(130, 195); // the open road south of the Port Sol yard
+  eq(stepKind(), 'collect', 'play: guards down opens the drive pickup');
+  p.x = 141; p.z = 177;
+  run(sim, 0.3, IN());
+  eq(stepKind(), 'boat', 'play: the drive is in hand — the boat leg opens');
+  p.x = 205; p.z = 42;
+  let boarded = false;
+  for (let i = 0; i < 60 * 25 && !boarded; i++) {
+    const nearBoat = S.boats.some(b => (b.x - p.x) ** 2 + (b.z - p.z) ** 2 < 50);
+    sim.step(1 / 60, IN({ moveX: 1, sprint: true, enterPressed: nearBoat }));
+    if (p.mode === 'boat') boarded = true;
+  }
+  ok(boarded, 'play: the boat is boarded by walking the pier');
+  const sailTo = (tx, tz, seconds) => {
+    for (let i = 0; i < 60 * seconds; i++) {
+      const b = S.boats[p.boatId];
+      const err = Math.atan2(tx - b.x, tz - b.z) - b.ang;
+      const wrapped = Math.atan2(Math.sin(err), Math.cos(err));
+      sim.step(1 / 60, IN({ moveZ: 1, moveX: Math.max(-1, Math.min(1, -wrapped * 2)) }));
+      if ((b.x - tx) ** 2 + (b.z - tz) ** 2 < 100) return true;
+    }
+    return false;
+  };
+  // east past the pier end first — the pier's push-out band traps a
+  // diagonal course, exactly as a player discovers in the first seconds
+  ok(sailTo(262, 40, 25) && sailTo(266, 88, 40), 'play: sailed to the first sea gate');
+  run(sim, 0.3, IN({ moveZ: 1 }));
+  eq(S.storyGate, 1, 'play: first sea gate cleared');
+  ok(sailTo(266, 58, 40), 'play: sailed to the second sea gate');
+  run(sim, 0.3, IN({ moveZ: 1 }));
+  eq(S.storyGate, 2, 'play: second sea gate cleared');
+  ok(sailTo(250, 44, 40), 'play: sailed home to the Sunstrand pier');
+  run(sim, 0.5, IN());
+  eq(S.story.done, 3, 'play: contract 3 complete — the boat leg sails end to end');
+  // contract 4 — transmitter, then the timed flight to the safehouse
+  acceptNext();
+  eq(S.story.active, 3, 'play: contract 4 accepted');
+  p.x = 77; p.z = -115;
+  sim.step(1 / 60, IN({ interactPressed: true }));
+  eq(stepKind(), 'flee', 'play: the transmitter is dead — run');
+  p.x = 13; p.z = 77;
+  run(sim, 0.3, IN());
+  eq(S.story.done, 4, 'play: contract 4 complete at the safehouse');
+  // contract 5 — the four-leg archive run against its own clock
+  acceptNext();
+  eq(S.story.active, 4, 'play: contract 5 accepted');
+  for (const [lx, lz] of [[-115, -179], [-179, 77], [141, 13], [205, 77]]) { p.x = lx; p.z = lz; run(sim, 0.3, IN()); }
+  eq(S.story.done, 5, 'play: contract 5 complete');
+  // contract 6 — raiders, the upload, and the clean rendezvous (F5, F29)
+  acceptNext();
+  eq(S.story.active, 5, 'play: contract 6 accepted');
+  p.hp = 100; p.armour = 100;
+  killGuards(13, 58); // the open street south of the safehouse
+  eq(stepKind(), 'interact', 'play: raiders down opens the upload');
+  p.x = -51; p.z = -51;
+  sim.step(1 / 60, IN({ interactPressed: true }));
+  eq(stepKind(), 'rendezvous', 'play: the upload is sent — the rendezvous is last');
+  clearWanted(S);
+  p.x = 5; p.z = 15; // Mara's doorstep: the old marker's address
+  run(sim, 0.5, IN());
+  eq(stepKind(), 'rendezvous', 'play: Mara\u2019s doorstep does NOT complete the rendezvous (F5)');
+  const evMark = S.events.length;
+  p.x = 205; p.z = -51;
+  run(sim, 0.5, IN());
+  eq(S.story.done, 6, 'play: the rendezvous completes contract 6');
+  ok(S.storyComplete === true, 'play: the story completes');
+  const evs = S.events.slice(evMark);
+  const di = evs.findIndex(e => e.k === 'dialogue' && e.lines === D.CONTRACTS[5].done);
+  const si = evs.findIndex(e => e.k === 'storycomplete');
+  ok(di >= 0 && si > di, 'play: the closing dialogue is emitted before story-complete (F29)');
+  eq(p.money, 6800, 'play: the $300 stake plus $6,500 of contracts is $6,800');
+}
+
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
