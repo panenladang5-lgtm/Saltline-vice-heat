@@ -97,6 +97,15 @@ const SLS = (() => {
       const veh = D.genVehicles(D.SEED + 2);
       S.cars = veh.cars.map(c => ({ ...c, speed: 0, steer: 0, fuel: 100, fuelKnown: false, gone: false, towed: false, laneTimer: Math.random() * 20, blockedT: 0, incidentT: -99, laneParked: false }));
       for (const bk of veh.bikes) S.cars.push({ ...bk, speed: 0, steer: 0, fuel: 100, fuelKnown: false, gone: false, towed: false, laneTimer: 0, blockedT: 0, incidentT: -99, laneParked: false });
+      // driver cars are born as lane state only (axis/road/along): give them
+      // the position + heading the lane model implies, so ang is never
+      // undefined (angLerp from undefined poisoned it to NaN for good)
+      for (const c of S.cars) {
+        if (c.x !== undefined) continue;
+        const rc = D.ROADS[c.road];
+        if (c.axis === 'NS') { c.x = rc + (c.dir > 0 ? 3.4 : -3.4); c.z = c.along; c.ang = c.dir > 0 ? 0 : Math.PI; }
+        else { c.z = rc + (c.dir > 0 ? -3.4 : 3.4); c.x = c.along; c.ang = c.dir > 0 ? Math.PI / 2 : -Math.PI / 2; }
+      }
       S.peds = D.genPeds(D.SEED + 1).map(p => ({ ...p, x: 0, z: 0, ang: 0, state: 'walk', hp: 30, swing: Math.random() * 6, fleeT: 0, fx: 0, fz: 0, counted: false, pauseOff: 0 }));
       for (const p of S.peds) { const pp = D.pedPos(p); p.x = pp.x; p.z = pp.z; }
       // helicopters (3)
@@ -417,7 +426,7 @@ const SLS = (() => {
       for (const u of S.policeCars) {
         if (!u.active) continue;
         const d2 = (u.x - car.x) ** 2 + (u.z - car.z) ** 2;
-        if (d2 < 10.2 && Math.abs(car.speed) > 6 && S.t - (u._rammedT || 0) > 1.5) {
+        if (d2 < 10.2 && Math.abs(car.speed) > 6 && S.t - (u._rammedT || -99) > 1.5) {
           u._rammedT = S.t;
           u.hp -= 12;
           const w = S.wanted;

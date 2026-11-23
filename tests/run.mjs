@@ -347,5 +347,197 @@ function run(sim, seconds, input) { const n = Math.round(seconds * 60); for (let
   ok(D.CHOP_PAY.pickup > 0 && D.CHOP_PAY.compact > 0, 'the chop shop prices the new types');
 }
 
+// ---- round 4: contract 1 pickup is vehicle-locked ----
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  p.x = D.SITES.mara.x; p.z = D.SITES.mara.z; p.mode = 'foot';
+  sim.step(1 / 60, IN({ interactPressed: true }));
+  eq(S.story.active, 0, 'veh: contract 1 accepted');
+  eq(S.story.currentStep().kind, 'collect', 'veh: first step is the pickup');
+  // on foot at the crate: nothing happens
+  p.x = -115; p.z = 13; p.speedNow = 0;
+  run(sim, 0.5, IN());
+  eq(S.story.currentStep().kind, 'collect', 'veh: on foot at the crate does not complete it');
+  // in a sedan at the crate: still nothing (cars rest on the road edge at
+  // x=-121, 6 units from the marker — inside the 7-unit completion ring)
+  const sedan = S.cars.find(c => c.type === 'sedan' && c.id !== 0);
+  sedan.x = -121; sedan.z = 13; sedan.speed = 0; sedan.parked = false; sedan.driver = false;
+  p.mode = 'car'; p.carId = sedan.id; p.x = sedan.x; p.z = sedan.z;
+  run(sim, 0.5, IN());
+  eq(S.story.currentStep().kind, 'collect', 'veh: a sedan at the crate does not complete it');
+  // in a pickup: the crate fits, the step completes
+  const pk = S.cars.find(c => c.type === 'pickup');
+  pk.x = -121; pk.z = 13; pk.speed = 0; pk.parked = false; pk.driver = false;
+  p.carId = pk.id; p.x = pk.x; p.z = pk.z;
+  run(sim, 0.5, IN());
+  eq(S.story.currentStep().kind, 'deliver', 'veh: arriving in a pickup completes the pickup');
+}
+
+// ---- round 4: contract 3 ends with a boat leg through sea gates ----
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  S.story.done = 2;
+  p.x = D.SITES.mara.x; p.z = D.SITES.mara.z; p.mode = 'foot';
+  sim.step(1 / 60, IN({ interactPressed: true }));
+  eq(S.story.active, 2, 'boat: contract 3 accepted');
+  S.guards.forEach(g => { g.down = true; });
+  run(sim, 0.25, IN());
+  eq(S.story.currentStep().kind, 'collect', 'boat: guards down advances to the drive pickup');
+  p.x = 141; p.z = 177;
+  run(sim, 0.25, IN());
+  eq(S.story.currentStep().kind, 'boat', 'boat: the drive pickup opens the boat leg');
+  sim.setBoats([{ x: 266, z: 88, ang: 0, speed: 0 }]);
+  p.mode = 'boat'; p.boatId = 0; p.x = 266; p.z = 88;
+  run(sim, 0.25, IN());
+  eq(S.storyGate, 1, 'boat: first sea gate cleared');
+  S.boats[0].x = 266; S.boats[0].z = 58;
+  run(sim, 0.25, IN());
+  eq(S.storyGate, 2, 'boat: second sea gate cleared');
+  const money0 = p.money;
+  S.boats[0].x = 250; S.boats[0].z = 44;
+  run(sim, 0.25, IN());
+  eq(S.story.done, 3, 'boat: reaching the pier completes contract 3');
+  eq(p.money, money0 + 950, 'boat: contract 3 pays $950');
+}
+
+// ---- round 4: contract 4 is a timed escape with forced heat ----
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  S.story.done = 3;
+  p.x = D.SITES.mara.x; p.z = D.SITES.mara.z; p.mode = 'foot';
+  sim.step(1 / 60, IN({ interactPressed: true }));
+  eq(S.story.active, 3, 'flee: contract 4 accepted');
+  eq(sim.stars(), 2, 'flee: two stars are forced from the moment the job is taken');
+  p.x = 77; p.z = -115;
+  sim.step(1 / 60, IN({ interactPressed: true }));
+  eq(S.story.currentStep().kind, 'flee', 'flee: killing the transmitter opens the escape');
+  ok(S.story.timerStarted, 'flee: the lockout timer starts with the transmitter');
+  const money0 = p.money;
+  p.x = 13; p.z = 77; p.speedNow = 0;
+  run(sim, 0.25, IN());
+  eq(S.story.done, 4, 'flee: reaching the safehouse completes contract 4');
+  eq(p.money, money0 + 1100, 'flee: contract 4 pays $1100');
+  eq(S.wanted.heatFloor, 0, 'flee: the safehouse burns the forced heat');
+}
+{
+  // timing out fails the contract but never locks it: Mara offers it again
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  S.story.done = 3;
+  p.x = D.SITES.mara.x; p.z = D.SITES.mara.z; p.mode = 'foot';
+  sim.step(1 / 60, IN({ interactPressed: true }));
+  p.x = 77; p.z = -115;
+  sim.step(1 / 60, IN({ interactPressed: true }));
+  p.hp = 1e6; p.armour = 100; // outlast the escort, watch the clock instead
+  run(sim, 92, IN());
+  eq(S.story.active, null, 'flee: the lockout expiring fails the contract');
+  eq(S.story.done, 3, 'flee: a failed escape keeps progress at 3 contracts');
+  S.wanted.episode = false; S.wanted.ledger = 0; S.wanted.heatFloor = 0;
+  p.x = D.SITES.mara.x; p.z = D.SITES.mara.z;
+  sim.step(1 / 60, IN({ interactPressed: true }));
+  eq(S.story.active, 3, 'flee: the contract can be taken again after a timeout');
+}
+
+// ---- round 4: witness reports — theft, delay, escape ----
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const car = S.cars.find(c => c.parked && !c.owned && !c.mission && c.type !== 'bike');
+  p.x = car.x; p.z = car.z; p.mode = 'foot';
+  sim.step(1 / 60, IN({ enterPressed: true }));
+  eq(p.mode, 'car', 'theft: the player is in the stolen car');
+  eq(S.wanted.episode, false, 'theft: an unseen theft opens no episode');
+  ok(S.wanted.report !== null, 'theft: an unseen theft files a witness report');
+  eq(sim.stars(), 0, 'theft: no star while the report is pending');
+  run(sim, 3.4, IN()); // linger at the scene
+  eq(S.wanted.points, 1, 'theft: the report matures into a point at the scene');
+  eq(sim.stars(), 1, 'theft: one star once the report lands');
+  eq(S.wanted.episode, true, 'theft: the episode opens when the report lands');
+}
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const car = S.cars.find(c => c.parked && !c.owned && !c.mission && c.type !== 'bike');
+  p.x = car.x; p.z = car.z; p.mode = 'foot';
+  sim.step(1 / 60, IN({ enterPressed: true }));
+  ok(S.wanted.report !== null, 'report: filed at the theft');
+  const sx = S.wanted.report.x, sz = S.wanted.report.z;
+  const fx = Math.abs(sx - (-190)) > Math.abs(sx - 200) ? -190 : 200;
+  const fz = Math.abs(sz - (-190)) > Math.abs(sz - 200) ? -190 : 200;
+  car.x = fx; car.z = fz; p.x = fx; p.z = fz; // break away before it matures
+  run(sim, 3.4, IN());
+  eq(S.wanted.points, 0, 'report: leaving the area kills the report');
+  eq(S.wanted.episode, false, 'report: no episode from a dead report');
+  eq(S.wanted.report, null, 'report: the report slot clears either way');
+}
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const car = S.cars.find(c => c.inLot) || S.cars.find(c => c.parked && !c.owned && c.type !== 'bike');
+  const u = S.policeCars[0];
+  u.active = true; u.x = car.x + 8; u.z = car.z; u.speed = 0;
+  p.x = car.x; p.z = car.z; p.mode = 'foot';
+  sim.step(1 / 60, IN({ enterPressed: true }));
+  eq(S.wanted.points, 1, 'theft seen: stealing in front of a patrol scores instantly');
+  eq(S.wanted.episode, true, 'theft seen: the episode opens instantly');
+  eq(S.wanted.report, null, 'theft seen: no witness delay when police watch');
+}
+
+// ---- round 4: light offences accumulate into a report ----
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const car = S.cars[0];
+  car.x = 0; car.z = 0; car.ang = 0; car.parked = false; car.speed = 0;
+  p.mode = 'car'; p.carId = 0; p.x = 0; p.z = 0;
+  const o = S.cars.find(c => c.id !== 0 && c.type !== 'bike');
+  for (let k = 0; k < 3; k++) {
+    o.x = car.x; o.z = car.z + 2.5; o.speed = 0; o.parked = false; o.driver = false;
+    car.speed = 14; car.ang = 0;
+    sim.step(1 / 60, IN({ moveZ: 1 }));
+    S.wanted.minorNext = 0; // staged bumps: lift the 2.5 s filing cooldown
+    car.speed = 0;
+  }
+  eq(sim.stars(), 0, 'minor: recorded bumps alone raise no star');
+  ok(S.wanted.report !== null && S.wanted.report.pts === 1, 'minor: three recorded bumps file a one-point report');
+  run(sim, 3.4, IN());
+  eq(sim.stars(), 1, 'minor: the matured report raises one star');
+}
+
+// ---- round 4: ramming a patrol car is an instant point ----
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const car = S.cars[0];
+  car.x = 0; car.z = 0; car.ang = 0; car.parked = false; car.speed = 0;
+  p.mode = 'car'; p.carId = 0; p.x = 0; p.z = 0;
+  const u = S.policeCars[0];
+  u.active = true; u.x = 0; u.z = 2.8; u.speed = 0; u.hp = 140;
+  car.speed = 12;
+  sim.step(1 / 60, IN({ moveZ: 1 }));
+  eq(S.wanted.points, 1, 'ramcop: ramming a patrol car scores a point instantly');
+  eq(S.wanted.episode, true, 'ramcop: the episode opens instantly');
+  eq(S.wanted.report, null, 'ramcop: no witness delay for a rammed patrol');
+  ok(u.hp < 140, 'ramcop: the patrol car takes damage');
+}
+
+// ---- round 4: the interceptor runs ahead of the player at 3 stars ----
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const car = S.cars[0];
+  car.x = 0; car.z = -100; car.ang = 0; car.parked = false; car.speed = 10;
+  p.mode = 'car'; p.carId = 0; p.x = 0; p.z = -100; p.ang = 0;
+  S.wanted.ledger = 6; S.wanted.episode = true; S.wanted.search = 1; // 3 stars
+  let ic = null, maxAhead = -1e9;
+  for (let chunk = 0; chunk < 48 && !ic; chunk++) {
+    run(sim, 0.25, IN({ moveZ: 1 }));
+    if (Math.abs(car.speed) < 8) car.speed = 18; // keep the run rolling after bumps
+    ic = S.policeCars.find(u => u.active && u.role === 'intercept') || null;
+  }
+  ok(ic !== null, 'interceptor: a unit runs interceptor at three stars');
+  for (let chunk = 0; chunk < 24 && ic; chunk++) {
+    run(sim, 0.25, IN({ moveZ: 1 }));
+    if (Math.abs(car.speed) < 8) car.speed = 18;
+    const ahead = (ic.tx - p.x) * Math.sin(p.ang) + (ic.tz - p.z) * Math.cos(p.ang);
+    if (ahead > maxAhead) maxAhead = ahead;
+    if (!ic.active) break;
+  }
+  ok(maxAhead > 5, `interceptor: its target sits ahead of the player's line (best ${maxAhead.toFixed(1)})`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
