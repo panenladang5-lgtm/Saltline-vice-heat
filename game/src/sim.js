@@ -24,13 +24,13 @@ const SLS = (() => {
         money: 300, weapon: 'sidearm', stamina: 100, mode: 'foot', carId: -1, boatId: -1,
         swing: 0, fireCd: 0, reloadT: 0, dead: false, deadT: 0, speedNow: 0,
       },
-      wanted: { ledger: 0, episode: false, search: 1, seen: false, crimeT: -99, heatFloor: 0 },
+      wanted: { ledger: 0, points: 0, episode: false, search: 1, seen: false, crimeT: -99, heatFloor: 0, minorCount: 0, minorT: -99, minorNext: 0, report: null },
       standing: {}, story, shellsGot: new Set(),
       cars: [], peds: [], guards: [], beachFolk: [],
       policeCars: [], policeFoot: [], helis: [],
       taxi: { phase: 'wait', spot: 0, seq: 0, dest: -1, fare: 0, timeLeft: 0, routeLen: 0, nextIn: 0, carId: -1 },
       blockCars: [], blockCd: 0, blocksSet: 0, lightPhase: 0,
-      race: null, raceResult: null, coast: null,
+      race: null, raceResult: null, coast: null, storyGate: 0,
       robbery: D.ROBBERY_SHOPS.map(() => ({ count: 0, cd: 0 })),
       robHold: null, channel: null,
       cooldowns: { quickFix: 0, cleanPlate: 0, lookout: 0 },
@@ -46,7 +46,7 @@ const SLS = (() => {
     const emit = (e) => S.events.push(e);
     const toast = (txt) => emit({ k: 'toast', txt });
     S.drainEvents = () => { const e = S.events; S.events = []; return e; };
-    const stars = () => Math.max(D.starsFromCasualties(S.wanted.ledger), S.wanted.episode ? S.wanted.heatFloor : 0);
+    const stars = () => Math.max(D.starsFromCasualties(S.wanted.ledger + S.wanted.points), S.wanted.episode ? S.wanted.heatFloor : 0);
     S.stars = stars;
 
     // ---------- world collision helpers ----------
@@ -121,6 +121,57 @@ const SLS = (() => {
       if (!w.episode) { w.episode = true; w.search = 1; w.heatFloor = Math.max(w.heatFloor, 1); }
       if (kind === 'robbery') { w.ledger = Math.max(w.ledger, 3); }
       w.search = Math.min(1, w.search + 0.35);
+    }
+    // ----- round 4 wanted model -----
+    // Heavy offences stay instant: casualties and robbery (ledger), gunfire
+    // (crime()), ramming a police car and theft witnessed by police
+    // (points). Light offences — civilian collisions, property scrapes —
+    // are only RECORDED: MINOR_LIMIT of them inside MINOR_WINDOW seconds
+    // files a witness report. A report matures REPORT_DELAY seconds after
+    // filing and turns into points + an episode only if the player is
+    // still within REPORT_RADIUS of the scene; break away and it dies
+    // unfiled. A lone theft files a report worth a full point by itself.
+    const MINOR_LIMIT = 3, MINOR_WINDOW = 45, REPORT_DELAY = 3, REPORT_RADIUS = 70;
+    function clearWantedAll() {
+      const w = S.wanted;
+      w.episode = false; w.ledger = 0; w.points = 0; w.heatFloor = 0; w.search = 1;
+      w.minorCount = 0; w.report = null;
+    }
+    function policeSeesPlayer(rangeCar, rangeFoot) {
+      const p = S.player;
+      for (const u of S.policeCars) if (u.active && dist2(u, p) < rangeCar * rangeCar && !losBlocked(u.x, u.z, p.x, p.z)) return true;
+      for (const u of S.policeFoot) if (u.active && dist2(u, p) < rangeFoot * rangeFoot && !losBlocked(u.x, u.z, p.x, p.z)) return true;
+      return false;
+    }
+    function fileReport(pts, x, z) {
+      const w = S.wanted;
+      if (w.report) { w.report.pts = Math.min(3, w.report.pts + pts); w.report.x = x; w.report.z = z; }
+      else { w.report = { at: S.t + REPORT_DELAY, pts, x, z }; toast('A witness is calling it in — break away from the area.'); }
+    }
+    function fileMinor() {
+      const w = S.wanted;
+      w.crimeT = S.t;
+      if (S.t - w.minorT > MINOR_WINDOW) w.minorCount = 0;
+      w.minorT = S.t;
+      w.minorCount++;
+      if (w.minorCount >= MINOR_LIMIT) {
+        w.minorCount = 0;
+        fileReport(1, S.player.x, S.player.z);
+      }
+    }
+    function offenseTheft(car) {
+      const w = S.wanted;
+      w.crimeT = S.t;
+      if (car.mission) { // the coupe job carries scripted heat: instant
+        w.episode = true; w.search = 1; w.heatFloor = Math.max(w.heatFloor, 1);
+        return;
+      }
+      if (policeSeesPlayer(55, 40)) {
+        w.points += 1; w.episode = true; w.search = 1; w.heatFloor = Math.max(w.heatFloor, 1);
+        toast('Stolen in front of a patrol — one star, instantly.');
+      } else {
+        fileReport(1, S.player.x, S.player.z);
+      }
     }
     function addCasualty(byPlayer, x, z) {
       if (byPlayer) {
@@ -206,11 +257,22 @@ const SLS = (() => {
       stepBeach(dt);
       // ----- wanted decay -----
       const w = S.wanted;
+      // witness report: matures after REPORT_DELAY; it only lands if the
+      // player is still near the scene — distance kills it
+      if (w.report && S.t >= w.report.at) {
+        const rp = w.report; w.report = null;
+        if (dist2(p, rp) < REPORT_RADIUS * REPORT_RADIUS) {
+          w.points += rp.pts;
+          if (!w.episode) { w.episode = true; w.search = 1; w.heatFloor = Math.max(w.heatFloor, 1); }
+          toast('The report landed — you are wanted.');
+        } else toast('The report went nowhere — nobody could place you.');
+      }
       if (w.episode) {
         if (!w.seen) {
           w.search -= D.searchDecayRate(stars(), S.standing[D.districtAt(p.x, p.z)]) * dt;
           if (w.search <= 0) {
-            w.episode = false; w.ledger = 0; w.heatFloor = 0; w.search = 1;
+            w.episode = false; w.ledger = 0; w.points = 0; w.heatFloor = 0; w.search = 1;
+            w.minorCount = 0; w.report = null;
             toast('The city forgets. Wanted cleared.');
             onWantedCleared();
           }
@@ -290,11 +352,14 @@ const SLS = (() => {
       const before = { x: car.x, z: car.z };
       const c = collideBuildings(nx, nz, 1.5);
       if ((c.x !== nx || c.z !== nz) && Math.abs(car.speed) > 6) {
-        const dmg = Math.min(20, (Math.abs(car.speed) - 5) * 1.1);
+        const hitSpeed = Math.abs(car.speed);
+        const dmg = Math.min(20, (hitSpeed - 5) * 1.1);
         damageCar(car, dmg, true);
         car.speed = -car.speed * 0.35;
         S.stats.crashes++;
         emit({ k: 'sfx', name: 'crash' });
+        // scraping property at speed is a recorded light offence
+        if (hitSpeed > 8 && S.t >= S.wanted.minorNext) { S.wanted.minorNext = S.t + 2.5; fileMinor(); }
       } else { car.x = c.x; car.z = c.z; }
       // car vs car bumps
       for (const o of S.cars) {
@@ -309,7 +374,8 @@ const SLS = (() => {
           if (Math.abs(car.speed) > 5) {
             damageCar(car, 3, true); damageCar(o, 3, false);
             o.incidentT = S.t; car.incidentT = S.t;
-            if (S.wanted.episode || Math.abs(car.speed) > 12) crime('collision');
+            // a hard bump into a civilian car is a recorded light offence
+            if (Math.abs(car.speed) > 8 && S.t >= S.wanted.minorNext) { S.wanted.minorNext = S.t + 2.5; fileMinor(); }
             emit({ k: 'sfx', name: 'bump' });
           }
         }
@@ -344,6 +410,25 @@ const SLS = (() => {
           S.stats.crashes++;
           emit({ k: 'sfx', name: 'crash' });
           if (u.hp <= 0) { u.active = false; S.blockCd = Math.max(S.blockCd, 8); toast('You smashed through the roadblock!'); }
+        }
+      }
+      // ramming a patrol car is witnessed by definition: an instant point,
+      // no report delay — the officer you hit IS the witness
+      for (const u of S.policeCars) {
+        if (!u.active) continue;
+        const d2 = (u.x - car.x) ** 2 + (u.z - car.z) ** 2;
+        if (d2 < 10.2 && Math.abs(car.speed) > 6 && S.t - (u._rammedT || 0) > 1.5) {
+          u._rammedT = S.t;
+          u.hp -= 12;
+          const w = S.wanted;
+          w.points += 1; w.crimeT = S.t;
+          if (!w.episode) { w.episode = true; w.heatFloor = Math.max(w.heatFloor, 1); }
+          w.search = 1;
+          damageCar(car, 5, true);
+          car.speed = -car.speed * 0.3;
+          S.stats.crashes++;
+          emit({ k: 'sfx', name: 'crash' });
+          toast('You rammed a patrol car — that one is personal.');
         }
       }
       // ped casualties by car
@@ -434,9 +519,8 @@ const SLS = (() => {
       const wasDriver = car.driver;
       if (!car.owned && !car.stolen) {
         car.stolen = true;
-        crime('theft');
-        if (car.mission) { S.wanted.search = 1; S.wanted.heatFloor = Math.max(S.wanted.heatFloor, 1); }
-        toast(car.mission ? 'Coupe taken — heat rises.' : 'Car stolen — heat rises.');
+        offenseTheft(car);
+        if (car.mission) toast('Coupe taken — heat rises.');
         emit({ k: 'sfx', name: 'alarm' });
       }
       if (wasDriver) { car.driver = false; /* driver flees: handled by ped spawn flag */ car._driverFled = true; }
@@ -627,6 +711,11 @@ const SLS = (() => {
       if (Math.random() < 0.5) x = snap(x); else z = snap(z);
       u.active = true; u.x = x; u.z = z; u.ang = Math.atan2(p.x - x, p.z - z);
       u.speed = 0; u.hp = 140; u.hasDriver = true; u.retireT = 0;
+      // from three stars, the first unit out runs interceptor: it drives to
+      // a point ahead of the player's line instead of chasing the tail
+      const anyInterceptor = S.policeCars.some(q => q.active && q.role === 'intercept');
+      u.role = (stars() >= 3 && !anyInterceptor) ? 'intercept' : 'chase';
+      u.tx = x; u.tz = z;
       emit({ k: 'policespawn', e: u });
     }
     function spawnPoliceFoot(fromCar) {
@@ -669,13 +758,27 @@ const SLS = (() => {
           continue;
         }
         if (d > 105 && !w.seen) { u.active = false; emit({ k: 'policedespawn', e: u }); continue; }
-        // pursuit: target lead ahead of player motion
-        const lead = 26;
-        const tx = p.x + Math.sin(p.ang) * p.speedNow * (d / lead) * 0.6;
-        const tz = p.z + Math.cos(p.ang) * p.speedNow * (d / lead) * 0.6;
+        // pursuit: chasers aim at a short lead on the player's motion.
+        // The interceptor aims far ahead — far enough to arrive first and
+        // sit across the player's line; once it is in place it closes in.
+        let tx, tz;
+        if (u.role === 'intercept') {
+          const lead = clamp(p.speedNow * 1.6, 18, 55);
+          tx = p.x + Math.sin(p.ang) * lead;
+          tz = p.z + Math.cos(p.ang) * lead;
+          const snapR = (v) => D.ROADS.reduce((q, c) => Math.abs(c - v) < Math.abs(q - v) ? c : q, D.ROADS[0]);
+          if (Math.abs(Math.cos(p.ang)) >= Math.abs(Math.sin(p.ang))) tx = snapR(tx); else tz = snapR(tz);
+          tx = clamp(tx, -208, 214); tz = clamp(tz, -208, 214);
+          if (Math.hypot(tx - u.x, tz - u.z) < 9) { tx = p.x; tz = p.z; }
+        } else {
+          const lead = 26;
+          tx = p.x + Math.sin(p.ang) * p.speedNow * (d / lead) * 0.6;
+          tz = p.z + Math.cos(p.ang) * p.speedNow * (d / lead) * 0.6;
+        }
+        u.tx = tx; u.tz = tz;
         const want = Math.atan2(tx - u.x, tz - u.z);
         u.ang = angLerp(u.ang, want, clamp(dt * (d < 20 ? 2.4 : 1.4), 0, 1));
-        const top = 27;
+        const top = u.role === 'intercept' ? 29 : 27;
         u.speed = clamp(u.speed + (d > 14 ? 16 : 6) * dt, 0, top);
         if (d < 9) u.speed = Math.min(u.speed, Math.max(4, p.speedNow + 2));
         let nx = u.x + Math.sin(u.ang) * u.speed * dt;
@@ -875,6 +978,7 @@ const SLS = (() => {
     }
     function setupStep() {
       const st = story.currentStep();
+      S.storyGate = 0;
       S.guards = S.guards.filter(g => g.down || g.neutral);
       if (st && st.kind === 'combat') spawnGuards(st.x, st.z, st.count);
     }
@@ -884,7 +988,30 @@ const SLS = (() => {
       if (!st) return;
       const p = S.player;
       if (st.kind === 'collect' || st.kind === 'deliver') {
-        if (dist(p, st) < 7 && p.speedNow < 1) advanceStory();
+        if (dist(p, st) < 7 && p.speedNow < 1) {
+          // a vehicle-locked pickup only completes from the right vehicle
+          if (st.veh && !(p.mode === 'car' && currentCar() && currentCar().type === st.veh)) {
+            if (S.t - (S._vehHintT || 0) > 5) { S._vehHintT = S.t; toast(`The crate only fits a ${st.veh} — bring one to the marker.`); }
+          } else advanceStory();
+        }
+      } else if (st.kind === 'boat') {
+        if (p.mode === 'boat') {
+          const gate = st.gates[S.storyGate || 0];
+          const tgt = gate || st.dest;
+          if (dist(p, tgt) < 12) {
+            if (gate) { S.storyGate++; emit({ k: 'sfx', name: 'gate' }); toast(`Sea gate ${S.storyGate}/${st.gates.length} cleared.`); }
+            else advanceStory();
+          }
+        }
+      } else if (st.kind === 'flee') {
+        if (dist(p, st) < 8 && p.speedNow < 1) {
+          // the safehouse burns the contract's forced heat and any report
+          const w = S.wanted;
+          w.heatFloor = 0; w.report = null;
+          if (w.ledger + w.points === 0) { w.episode = false; w.search = 1; }
+          toast('Safehouse reached — the lockout is beaten.');
+          advanceStory();
+        }
       } else if (st.kind === 'delivercar') {
         const car = S.cars.find(c => c.id === st.carId);
         if (car && dist(car, D.SITES.chop) < 9 && Math.abs(car.speed) < 1) {
@@ -1004,8 +1131,8 @@ const SLS = (() => {
               if (p.money >= D.PRICES.quickFix) { p.money -= D.PRICES.quickFix; car.hp = Math.min(100, car.hp + 40); S.cooldowns.quickFix = 90; toast('Quick fix done: +40 hp, −$35.'); emit({ k: 'sfx', name: 'repair' }); }
             } else if (ch.kind === 'cleanplate') {
               const st = stars();
-              if (st <= 1) { S.wanted.episode = false; S.wanted.ledger = 0; S.wanted.heatFloor = 0; }
-              else S.wanted.ledger = D.ledgerBelowBand(st);
+              if (st <= 1) clearWantedAll();
+              else { S.wanted.ledger = D.ledgerBelowBand(st); S.wanted.points = 0; }
               S.cooldowns.cleanPlate = 180;
               toast('Clean plate fitted — one star gone.');
             }
@@ -1311,6 +1438,11 @@ const SLS = (() => {
           emit({ k: 'dialogue', lines: c.start, title: `${c.id < 10 ? '0' + c.id : c.id} / ${c.title} — $${c.reward}` });
           emit({ k: 'brief', txt: c.brief });
           setupStep();
+          if (c.id === 4) { // the tracker job: heat rides along from the start
+            S.wanted.episode = true; S.wanted.search = 1;
+            S.wanted.heatFloor = Math.max(S.wanted.heatFloor, 2);
+            toast('The tracker is already warm — two stars ride with this contract.');
+          }
           saveGame();
         }
       } else if (act === 'step') {
@@ -1398,7 +1530,8 @@ const SLS = (() => {
       if (!p.dead || p.money < D.PRICES.rescue) return false;
       p.money -= D.PRICES.rescue;
       p.hp = 65; p.dead = false;
-      S.wanted.episode = false; S.wanted.ledger = 0; S.wanted.heatFloor = 0;
+      S.wanted.episode = false; S.wanted.ledger = 0; S.wanted.points = 0; S.wanted.heatFloor = 0;
+      S.wanted.report = null; S.wanted.minorCount = 0;
       toast('The medics patch you up on the spot. −$100, wanted cleared.');
       return true;
     }
@@ -1408,7 +1541,8 @@ const SLS = (() => {
       p.hp = 100; p.armour = 20; p.dead = false;
       p.mode = 'foot'; p.carId = -1; p.boatId = -1;
       p.x = D.SITES.clinic.x; p.z = D.SITES.clinic.z;
-      S.wanted.episode = false; S.wanted.ledger = 0; S.wanted.heatFloor = 0;
+      S.wanted.episode = false; S.wanted.ledger = 0; S.wanted.points = 0; S.wanted.heatFloor = 0;
+      S.wanted.report = null; S.wanted.minorCount = 0;
       toast('You wake at the clinic. −$100, wanted cleared.');
       return true;
     }

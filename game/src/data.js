@@ -361,9 +361,9 @@ const CHAPTERS = [
 const CONTRACTS = [
   {
     id: 1, giver: 'Mara', title: 'A favor in the sun', reward: 450,
-    brief: 'Grab the blue courier car. Pick up a sealed ledger in Little Palm, then deliver it to the rooftop crew in Coral Heights.',
+    brief: 'Grab the blue courier car. Pick up a sealed ledger in Little Palm, then deliver it to the rooftop crew in Coral Heights. The ledger rides in a crate that only fits a pickup bed — arrive at the pickup point in a pickup.',
     steps: [
-      { kind: 'collect', x: -115, z: 13, label: 'Pick up the sealed ledger in Little Palm' },
+      { kind: 'collect', x: -115, z: 13, veh: 'pickup', label: 'Pick up the sealed ledger in Little Palm' },
       { kind: 'deliver', x: 77, z: 141, label: 'Deliver to the rooftop crew in Coral Heights' },
     ],
     start: [['MARA', 'The Port Sol ledger is packed. Pick it up in Little Palm, take it to the rooftop crew in Coral Heights.'], ['KAI', 'Take the blue car, drive slow, don\'t break the seal.'], ['MARA', 'Exactly. Seal intact, payment intact — $450.']],
@@ -381,20 +381,21 @@ const CONTRACTS = [
   },
   {
     id: 3, giver: 'Mara', title: 'Port of no return', reward: 950,
-    brief: 'A crooked security crew at Port Sol is guarding evidence. Disable the three guards and take their drive.',
+    brief: 'A crooked security crew at Port Sol is guarding evidence. Disable the three guards and take their drive. Then run the drive out by water — through the sea gates to the Sunstrand pier, where Mara\'s contact waits.',
     steps: [
       { kind: 'combat', x: 141, z: 177, count: 3, label: 'Disable the three guards at Port Sol' },
       { kind: 'collect', x: 141, z: 177, label: 'Take the drive' },
+      { kind: 'boat', gates: [{ x: 266, z: 88 }, { x: 266, z: 58 }], dest: { x: 250, z: 44 }, label: 'Run the drive out by water to the Sunstrand pier' },
     ],
     start: [['MARA', 'The Port Sol security crew is guarding a drive full of their blackmail evidence.'], ['KAI', 'Three armed guards on the dock.'], ['MARA', 'Drop them, take the drive. Don\'t give them a chance to call it in.']],
     done: [['KAI', 'The drive is safe. Three guards are having nightmares on the dock.'], ['MARA', 'Don\'t stray far from trouble: that drive is broadcasting. They can follow us.']],
   },
   {
-    id: 4, giver: 'Mara', title: 'Off the grid', reward: 1100,
-    brief: 'The drive has an active tracker. Find the transmitter in the Glass District, then lose the police. Alleys and distance break their search.',
+    id: 4, giver: 'Mara', title: 'Off the grid', reward: 1100, timed: 90,
+    brief: 'The drive has an active tracker. The heat is on you from the moment you take this job. Find the transmitter in the Glass District, then reach the safehouse before the lockout — the clock starts when the transmitter dies.',
     steps: [
       { kind: 'interact', x: 77, z: -115, heat: 2, label: 'Kill the transmitter in the Glass District' },
-      { kind: 'escape', label: 'Lose the police completely' },
+      { kind: 'flee', x: 13, z: 77, label: 'Reach the safehouse before the lockout' },
     ],
     start: [['MARA', 'The transmitter is in the Glass District. Kill it, then vanish off the map.'], ['KAI', 'The cops will come the moment I kill it.'], ['MARA', 'Count on it. Alleys and distance break their line of sight — wait until the city forgets.']],
     done: [['MARA', 'Signal dead. We\'re ghosts again.'], ['KAI', 'And my name?'], ['MARA', 'It just went up in price. Lucky nobody can afford it.']],

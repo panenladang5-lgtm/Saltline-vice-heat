@@ -537,7 +537,9 @@ Story: take contracts from Mara at the dispatch office (pink M). Finish all six 
       searchWrap.style.display = S.wanted.episode ? 'block' : 'none';
       searchFill.style.width = `${Math.round(S.wanted.search * 100)}%`;
       const anyFollow = S.helis.some(h => h.mode === 'follow');
-      heliEl.textContent = anyFollow ? 'AIR: ON YOU' : (S.helis.length ? 'AIR: PATROL' : '');
+      heliEl.textContent = S.wanted.report
+        ? `WITNESS REPORT IN ${Math.max(0, S.wanted.report.at - S.t).toFixed(1)}s — BREAK AWAY`
+        : (anyFollow ? 'AIR: ON YOU' : (S.helis.length ? 'AIR: PATROL' : ''));
       weaponEl.innerHTML = p.weapon === 'sidearm'
         ? `SIDEARM<div id="hud-ammo">${p.clip} / ${p.ammo}${p.reloadT > 0 ? ' · RELOADING' : ''}</div>`
         : `BATON<div id="hud-ammo">—</div>`;

@@ -46,10 +46,8 @@
   const smokeGeo = new THREE.IcosahedronGeometry(0.55, 0);
   const smokeMat = new THREE.MeshBasicMaterial({ color: 0x555c60, transparent: true, opacity: 0.4, depthWrite: false });
 
-  function seatFigure(colorOpts) {
-    const fig = SLA.makeFigure(colorOpts);
-    fig.pose(0, 'sit');
-    return fig;
+  function seatFigure(colorOpts, type = 'sedan') {
+    return SLA.makeSeatedFigure(colorOpts, type);
   }
   sim.buildEntities((st) => {
     pedField = new SLA.PedField(st.peds);
@@ -68,8 +66,7 @@
       smoke.visible = false; smoke.position.set(car.x, 1.4, car.z);
       scene.add(smoke); smokeMeshes.set(car.id, smoke);
       if (car.driver && car.type !== 'bike') {
-        const fig = seatFigure({ shirt: 0x777d84, pants: 0x3a4149 });
-        fig.group.position.set(-0.38, 0.52, 0.05);
+        const fig = seatFigure({ shirt: 0x777d84, pants: 0x3a4149 }, car.type);
         refs.group.add(fig.group);
         refs.driverFig = fig;
       }
@@ -77,8 +74,7 @@
     for (let i = 0; i < st.policeCars.length; i++) {
       const refs = SLA.makeCarMesh('sedan', 0xf2f4f6, { police: true });
       refs.group.visible = false;
-      const fig = seatFigure({ shirt: 0x2b4d8f, pants: 0x22345c, cap: 0x1d3468 });
-      fig.group.position.set(-0.38, 0.52, 0.05);
+      const fig = seatFigure({ shirt: 0x2b4d8f, pants: 0x22345c, cap: 0x1d3468 }, 'sedan');
       refs.group.add(fig.group);
       scene.add(refs.group);
       policeCarRefs.push(refs);
@@ -147,15 +143,14 @@
     passengerFig.group.visible = false;
     scene.add(passengerFig.group);
     // the same passenger, seated in the cab for the length of the fare
-    fareFig = seatFigure({ shirt: 0xead94f, pants: 0x404a5a });
+    fareFig = seatFigure({ shirt: 0xead94f, pants: 0x404a5a }, 'sedan');
     fareFig.group.visible = false;
     scene.add(fareFig.group);
     // the race rival: a crimson sport coupe with its own driver, on stage
     // only while a street race is running
     rivalRefs = SLA.makeCarMesh('sport', 0xd92b3a, {});
     rivalRefs.group.visible = false;
-    const rfig = seatFigure({ shirt: 0x8e1f2f, pants: 0x2a2e38 });
-    rfig.group.position.set(-0.38, 0.52, 0.05);
+    const rfig = seatFigure({ shirt: 0x8e1f2f, pants: 0x2a2e38 }, 'sport');
     rivalRefs.group.add(rfig.group);
     scene.add(rivalRefs.group);
     // roadblock units (parked police cars, bound to the sim's block pool)
@@ -323,10 +318,20 @@
   function computeObjective() {
     const st = S.story.currentStep();
     if (st) {
-      if (st.kind === 'collect' || st.kind === 'deliver' || st.kind === 'interact' || st.kind === 'combat') objPos = { x: st.x, z: st.z };
+      if (st.kind === 'collect' || st.kind === 'deliver' || st.kind === 'interact' || st.kind === 'combat' || st.kind === 'flee') objPos = { x: st.x, z: st.z };
       else if (st.kind === 'stealcar') { const c = S.cars.find(c => c.id === st.carId); objPos = c ? { x: c.x, z: c.z } : null; }
       else if (st.kind === 'delivercar') objPos = D.SITES.chop;
       else if (st.kind === 'rendezvous') objPos = D.SITES.mara;
+      else if (st.kind === 'boat') {
+        if (S.player.mode !== 'boat') {
+          let best = null, bd = 1e12;
+          for (const b of boatStates) { const d = (b.x - S.player.x) ** 2 + (b.z - S.player.z) ** 2; if (d < bd) { bd = d; best = b; } }
+          objPos = best;
+        } else {
+          const g = st.gates[S.storyGate || 0];
+          objPos = g || st.dest;
+        }
+      }
       else objPos = null;
     } else if (S.taxi.phase === 'fare') objPos = D.TAXI_SPOTS[S.taxi.dest];
     else if (S.taxi.passengerOut && S.taxi.phase === 'wait') objPos = D.TAXI_SPOTS[S.taxi.spot];
@@ -341,13 +346,15 @@
       const c = S.story.contract();
       const down = S.guards.filter(g => g.down || g.neutral).length;
       const stepText = {
-        collect: `Pick up: <b>${st.what}</b>`,
-        deliver: `Deliver: <b>${st.what}</b>`,
+        collect: `Pick up: <b>${st.label}</b>${st.veh ? ` — the crate only fits a <b>${st.veh}</b>` : ''}`,
+        deliver: `Deliver: <b>${st.label}</b>`,
         stealcar: 'Steal the <b>marked coupe</b>',
         delivercar: 'Deliver the coupe to the <b>chop shop</b>',
         combat: `Clear the guards — <b>${down}/${st.count}</b> down`,
         interact: `<b>${st.label}</b>`,
         escape: '<b>Lose the heat</b> — break line of sight',
+        boat: `Run the <b>sea gates</b> — finish at the Sunstrand pier`,
+        flee: '<b>Reach the safehouse</b> before the lockout',
         rendezvous: 'Meet <b>Mara</b> — arrive clean, no wanted level',
       }[st.kind] || '';
       html = `<b>${c.id}. ${c.title}</b> — $${c.reward}<br>${stepText}`;
@@ -422,8 +429,10 @@
           playerFig.group.visible = false; // the bike mesh carries its rider
         } else {
           playerFig.group.visible = true;
+          const fit = SLA.seatFit(car.type);
+          playerFig.group.scale.setScalar(fit.s);
           const s = Math.sin(car.ang), c = Math.cos(car.ang);
-          playerFig.group.position.set(car.x + (-0.38 * c + 0.05 * s), 0.52, car.z + (0.38 * s + 0.05 * c));
+          playerFig.group.position.set(car.x + (fit.x * c + fit.z * s), fit.y, car.z + (-fit.x * s + fit.z * c));
           playerFig.group.rotation.set(0, car.ang, 0);
           playerFig.pose(0, 'sit');
         }
@@ -431,11 +440,13 @@
     } else if (p.mode === 'boat') {
       const boat = boatStates[p.boatId];
       playerFig.group.visible = true;
-      playerFig.group.position.set(boat.x, 0.72, boat.z);
+      playerFig.group.scale.setScalar(SLA.HUMAN_SCALE);
+      playerFig.group.position.set(boat.x + Math.sin(boat.ang) * 0.45, 0.52, boat.z + Math.cos(boat.ang) * 0.45);
       playerFig.group.rotation.set(0, boat.ang, 0);
       playerFig.pose(0, 'sit');
     } else {
       playerFig.group.visible = true;
+      playerFig.group.scale.setScalar(SLA.HUMAN_SCALE);
       playerFig.group.position.set(p.x, p.y, p.z);
       playerFig.group.rotation.set(0, p.ang, 0);
       if (p.dead) playerFig.pose(0, 'down');
@@ -551,10 +562,10 @@
         refs.cone.lookAt(p.x, 0, p.z);
         refs.cone.rotateX(-Math.PI / 2);
         refs.cone.scale.set(r, dist, r);
-        refs.cone.material.opacity = 0.15;
+        refs.cone.material.opacity = 0.09; // softened in round 4: the beam must not wash out the frame
         refs.disc.position.set(p.x, 0.14, p.z);
         refs.disc.scale.setScalar(r + 0.6);
-        refs.disc.material.opacity = 0.32;
+        refs.disc.material.opacity = 0.24;
       }
       refs.beacon.visible = Math.floor(S.t * 1.6 + i) % 2 === 0;
     });
@@ -564,6 +575,7 @@
       refs.group.position.set(tw.x, 0, tw.z);
       refs.group.rotation.y = tw.ang;
       if (refs.wheels) for (const w of refs.wheels) w.rotation.x += tw.speed * dt * 1.9;
+      if (refs.lights && refs.lights.userData.setLevel) refs.lights.userData.setLevel(lightLevel / 2);
       const rig = tw.state === 'hook' || tw.state === 'haul';
       refs.cable.visible = rig; refs.hook.visible = rig;
       refs.beacon.visible = tw.state !== 'idle' && Math.floor(S.t * 2 + i) % 2 === 0;
@@ -634,7 +646,8 @@
     if (fareCar && !fareCar.gone) {
       fareFig.group.visible = true;
       const ca = Math.cos(fareCar.ang), sa = Math.sin(fareCar.ang);
-      fareFig.group.position.set(fareCar.x + 0.38 * ca + 0.05 * sa, 0.52, fareCar.z - 0.38 * sa + 0.05 * ca);
+      // back seat of the cab: right side, behind the driver, inside the glass
+      fareFig.group.position.set(fareCar.x + 0.38 * ca - 0.55 * sa, 0.44, fareCar.z - 0.38 * sa - 0.55 * ca);
       fareFig.group.rotation.y = fareCar.ang;
     } else fareFig.group.visible = false;
     // objective marker + gates
@@ -643,8 +656,10 @@
       marker.position.set(objPos.x, 0, objPos.z);
       marker.rotation.y += dt * 1.8;
     } else marker.visible = false;
-    const gates = S.race ? S.race.gates : (S.coast ? D.COAST_RUN.gates : null);
-    const nextIdx = S.race ? S.race.next : (S.coast ? S.coast.next : -1);
+    const storyStep = S.story.currentStep();
+    const boatGates = storyStep && storyStep.kind === 'boat' ? [...storyStep.gates, storyStep.dest] : null;
+    const gates = S.race ? S.race.gates : (S.coast ? D.COAST_RUN.gates : boatGates);
+    const nextIdx = S.race ? S.race.next : (S.coast ? S.coast.next : (boatGates ? (S.storyGate || 0) : -1));
     gateRings.forEach((ring, i) => {
       if (gates && i < gates.length) {
         ring.visible = true;
@@ -782,109 +797,102 @@
   // Every shot is a real frame of the live game: the sim settles, then the
   // scene is composed by placing real entities, and the HUD + minimap are
   // painted exactly as they are in play.
-  function stageStreetLife() {
-    // a busy block around the cover scene: queued traffic both ways, with
-    // the fleet's shapes on show — a pickup and a hatchback join the queue
-    const spots = [[3.4, 30, 0], [-3.4, 12, Math.PI], [3.4, 16, 0], [-3.4, 34, Math.PI], [3.4, 40, 0], [-3.4, 52, Math.PI]];
-    const drivers = S.cars.filter(c => c.driver && c.type !== 'bike');
-    const ordered = [];
-    for (const t of ['pickup', 'compact', 'taxi']) {
-      const c = drivers.find(q => q.type === t && !ordered.includes(q));
-      if (c) ordered.push(c);
-    }
-    for (const c of drivers) { if (ordered.length >= spots.length) break; if (!ordered.includes(c)) ordered.push(c); }
-    ordered.forEach((c, n) => {
-      const s = spots[n]; if (!s) return;
-      c.x = s[0]; c.z = s[1]; c.ang = s[2]; c.speed = 0;
-      c.axis = 'NS'; c.road = 3; c.dir = s[2] === 0 ? 1 : -1; c.along = s[1];
-    });
-    // pedestrians on both sidewalks of the same block
-    let m = 0;
-    for (const pd of S.peds) {
-      if (m >= 18 || pd.state === 'down') continue;
-      pd.x = (m % 2 ? -1 : 1) * (6.4 + (m % 5) * 0.85);
-      pd.z = 10 + Math.floor(m / 2) * 5.6 + (m % 3);
-      pd.ang = m % 2 ? 0.4 : Math.PI - 0.4;
-      m++;
-    }
-  }
-  function stageCoastalDrive() {
+  // Round 4 set: four shots in four different districts — a race duel in
+  // the Glass District, a night intercept in Port Sol with the helicopter
+  // itself in frame, dusk street life in Little Palm (new figure scale,
+  // seated drivers, corrected headlight beams), and a boat run off
+  // Sunstrand pier.
+  function stageRaceDuel() {
     const p = S.player;
     const car = S.cars[0];
-    // start further south and angle the camera in, so the SUNSTRAND gate
-    // board sits whole inside the frame instead of cropped at its edge
-    car.x = 192; car.z = 124; car.ang = Math.PI; car.driver = false; car.parked = false; car.speed = 23;
-    p.mode = 'car'; p.carId = 0; p.x = car.x; p.z = car.z; p.ang = Math.PI; p.speedNow = 23;
-    const spots = [[188.6, 100, Math.PI], [188.6, 74, Math.PI], [195.4, 98, 0], [195.4, 142, 0], [188.6, 152, Math.PI]];
+    car.x = -40; car.z = -124.6; car.ang = Math.PI / 2; car.driver = false; car.parked = false; car.speed = 24;
+    p.mode = 'car'; p.carId = 0; p.x = car.x; p.z = car.z; p.ang = Math.PI / 2; p.speedNow = 24;
+    S.race = {
+      name: D.RACES[0].name, gates: D.RACES[0].gates, next: 3, time: 12.4, par: D.RACES[0].par,
+      rival: { x: -33, z: -131.4, ang: Math.PI / 2, speed: 24, next: 3 },
+    };
+    // traffic ahead on the same avenue, so the frame has depth
+    const spots = [[28, -124.6, Math.PI / 2], [58, -131.4, Math.PI / 2]];
     let n = 0;
     for (const c of S.cars) {
       if (!c.driver || c.type === 'bike' || c.id === 0) continue;
       const s = spots[n++]; if (!s) break;
-      c.x = s[0]; c.z = s[1]; c.ang = s[2]; c.speed = 11;
-      c.axis = 'NS'; c.road = 6; c.dir = s[2] === 0 ? 1 : -1; c.along = s[1];
+      c.x = s[0]; c.z = s[1]; c.ang = s[2]; c.speed = 14;
+      c.axis = 'EW'; c.road = 1; c.dir = 1; c.along = s[0];
     }
-    ui.camYaw = Math.PI - 0.38;
+    ui.camYaw = Math.PI / 2; ui.camDist = 11;
   }
-  function stageChase() {
-    const p = S.player;
-    for (const u of S.policeCars) u.active = false;
-    for (const u of S.policeFoot) u.active = false;
-    const spots = [[-4, 28, 0], [12, 22, 0]];
-    S.policeCars.forEach((u, i) => {
-      const s = spots[i]; if (!s) return;
-      u.active = true; u.speed = 0;
-      u.x = s[0]; u.z = s[1];
-      u.ang = Math.atan2(p.x - u.x, p.z - u.z);
-    });
-    const f = S.policeFoot[0];
-    if (f) { f.active = true; f.x = p.x + 4.5; f.z = p.z - 9; f.ang = Math.atan2(p.x - f.x, p.z - f.z); }
-    // at five stars the net closes: a roadblock unit parked across the road
-    const b = S.blockCars && S.blockCars[0];
-    if (b) { b.active = true; b.x = p.x + 1.5; b.z = p.z - 27; b.ang = Math.PI / 2; b.hp = 200; }
-    const h = S.helis[0];
-    h.x = p.x + 15; h.z = p.z - 24; h.y = 20; h.spotOn = true; h.mode = 'follow';
-    const h2 = S.helis[1];
-    if (h2) { h2.x = p.x - 21; h2.z = p.z - 36; h2.y = 27; h2.spotOn = false; h2.mode = 'follow'; }
-  }
-  function stageStorm() {
+  function stageHeliPort() {
     const p = S.player;
     const car = S.cars[0];
-    car.x = 3.4; car.z = 40; car.ang = Math.PI; car.driver = false; car.parked = false; car.speed = 19;
-    p.mode = 'car'; p.carId = 0; p.x = car.x; p.z = car.z; p.ang = Math.PI; p.speedNow = 19;
-    // the storm at full strength: rain, wet sheen, dark puddles
-    S.weather.storm = true; S.weather.intensity = 1; S.stormI = 1;
-    // a patrol car waiting ahead in the rain, and the heli's beam above
+    car.x = 140; car.z = 188.6; car.ang = Math.PI / 2; car.driver = false; car.parked = false; car.speed = 14;
+    p.mode = 'car'; p.carId = 0; p.x = car.x; p.z = car.z; p.ang = Math.PI / 2; p.speedNow = 14;
+    for (const u of S.policeCars) u.active = false;
+    for (const u of S.policeFoot) u.active = false;
     const u = S.policeCars[0];
-    if (u) { u.active = true; u.x = -3.4; u.z = 26; u.speed = 0; u.ang = Math.atan2(p.x - u.x, p.z - u.z); }
+    if (u) { u.active = true; u.x = 124; u.z = 191.6; u.speed = 14; u.ang = Math.PI / 2; }
+    const b = S.blockCars && S.blockCars[0];
+    if (b) { b.active = true; b.x = 168; b.z = 190; b.ang = 0.15; b.hp = 200; }
+    // the helicopter itself, low and close enough to fill the upper frame
     const h = S.helis[0];
-    if (h) { h.x = p.x + 16; h.z = p.z - 16; h.y = 21; h.spotOn = true; h.mode = 'follow'; }
+    h.x = p.x + 14; h.z = p.z - 13; h.y = 12; h.spotOn = true; h.mode = 'follow';
+    const h2 = S.helis[1];
+    if (h2) { h2.x = p.x - 34; h2.z = p.z - 40; h2.y = 26; h2.spotOn = false; h2.mode = 'follow'; }
+    ui.camYaw = Math.PI / 2 + 0.25; ui.camDist = 12;
+  }
+  function stagePalmDusk() {
+    const p = S.player;
+    // a dusk queue on the Little Palm avenue, drivers seated in their cabs;
+    // the player stands beside the lead pickup at full figure scale
+    const drivers = S.cars.filter(c => c.driver && c.type !== 'bike');
+    const ordered = [];
+    for (const t of ['pickup', 'sedan', 'compact', 'taxi']) {
+      const c = drivers.find(q => q.type === t && !ordered.includes(q));
+      if (c) ordered.push(c);
+    }
+    const spots = [[-124.6, 4, 0], [-124.6, 14.5, 0], [-124.6, 24, 0], [-131.4, 18, Math.PI]];
+    ordered.forEach((c, n) => {
+      const s = spots[n]; if (!s) return;
+      c.x = s[0]; c.z = s[1]; c.ang = s[2]; c.speed = 0;
+      c.axis = 'NS'; c.road = 0; c.dir = s[2] === 0 ? 1 : -1; c.along = s[1];
+    });
+    p.mode = 'foot'; p.x = -121.6; p.z = 8.5; p.y = 0; p.ang = 0.5; p.speedNow = 0;
+    let m = 0;
+    for (const pd of S.peds) {
+      if (m >= 10 || pd.state === 'down') continue;
+      pd.x = -120.6 + (m % 3) * 0.8;
+      pd.z = 2 + m * 3.4;
+      pd.ang = Math.PI - 0.3;
+      m++;
+    }
+    ui.camYaw = Math.PI + 0.5; ui.camDist = 11;
+  }
+  function stageBoatRun() {
+    const p = S.player;
+    const boat = boatStates[0];
+    boat.x = 238; boat.z = 47; boat.ang = -Math.PI / 2; boat.speed = 9;
+    p.mode = 'boat'; p.boatId = 0; p.x = boat.x; p.z = boat.z; p.ang = -Math.PI / 2; p.speedNow = 9;
+    ui.camYaw = -Math.PI / 2; ui.camDist = 11;
   }
   function applyShot(name) {
     const p = S.player;
     S.weather.storm = false; S.weather.intensity = 0; S.stormI = 0;
-    if (name === 'mission-day') {
-      S.hours = 17.35; p.x = 5.4; p.z = 44; p.ang = Math.PI + 0.3; ui.camYaw = Math.PI + 0.3; ui.camDist = 12;
-    } else if (name === 'driving') {
-      S.hours = 16.9; ui.camDist = 10;
-    } else if (name === 'night-heli') {
-      S.hours = 21.3;
-      p.x = 3.4; p.z = 46; p.ang = 2.6;
-      S.wanted.episode = true; S.wanted.ledger = 12; S.wanted.search = 1;
-      ui.camYaw = 2.85;
-    } else if (name === 'storm') {
-      S.hours = 20.4;
+    if (name === 'race') {
+      S.hours = 17.35;
+    } else if (name === 'heliport') {
+      S.hours = 20.9;
       S.wanted.episode = true; S.wanted.ledger = 9; S.wanted.search = 1;
-      ui.camYaw = Math.PI + 0.25; ui.camDist = 9;
-    } else if (name === 'beach') {
-      S.hours = 17.9; p.x = 213; p.z = 30; p.ang = Math.PI / 2; ui.camYaw = Math.PI / 2 - 0.55; ui.camDist = 11;
+    } else if (name === 'palm') {
+      S.hours = 18.9;
+    } else if (name === 'boat') {
+      S.hours = 17.9;
     }
     const neutral = { moveX: 0, moveZ: 0, sprint: false, fire: false, handbrake: false, enterPressed: false, interactPressed: false, reloadPressed: false, weaponPressed: false, jumpPressed: false, interactHeld: false };
     for (let i = 0; i < 170; i++) sim.step(1 / 60, neutral);
-    if (name === 'mission-day') stageStreetLife();
-    if (name === 'driving') stageCoastalDrive();
-    if (name === 'night-heli') stageChase();
-    if (name === 'storm') stageStorm();
-    if (name === 'beach') { p.x = 213; p.z = 30; p.y = 0; }
+    if (name === 'race') stageRaceDuel();
+    if (name === 'heliport') stageHeliPort();
+    if (name === 'palm') stagePalmDusk();
+    if (name === 'boat') stageBoatRun();
     S.starsCache = sim.stars();
     const objective = computeObjective();
     processEvents();
@@ -897,7 +905,7 @@
     const ty = (p.mode === 'foot' ? p.y + 1.55 : 1.4);
     camera.position.set(p.x - fx * dist, ty + dist * 0.42, p.z - fz * dist);
     camera.lookAt(p.x + fx * 7, ty + 0.4, p.z + fz * 7);
-    if (name === 'driving') { camera.fov = 67; camera.updateProjectionMatrix(); }
+    if (name === 'race') { camera.fov = 67; camera.updateProjectionMatrix(); }
     ui.updateHUD(S, D, { vehicle: null, objective, context: null, channel: -1 });
     ui.drawMinimap(S, D);
     renderer.render(scene, camera);
