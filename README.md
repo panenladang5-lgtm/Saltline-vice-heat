@@ -18,7 +18,9 @@ One seeded, deterministic city: 131 buildings, 98 street lamps that wake up
 into a full night-lighting layer after dark, 720 pedestrians, 78 vehicles
 with working traffic, traffic lights and night parking. The fleet reads at
 a glance — sedans, sport coupes, vans, taxis, pickups with loaded beds and
-compact hatchbacks — and the buildings carry their own signage: glazed
+compact hatchbacks — drivers sit inside translucent cabins, headlights
+throw true beams down the road after dark, and the residents stand at
+honest adult scale beside the cars. The buildings carry their own signage: glazed
 shopfronts, blade signs over the pavement, lit panels on the tower roofs.
 After dark a second layer of lit windows switches on, so the towers feel
 lived in. Six districts —
@@ -28,14 +30,24 @@ earn shop discounts, spill blood and it collapses.
 
 ## What you can do
 
-- **Six-contract story** in three chapters, with briefings and dialogue,
-  timed archive runs, a transmitter job that spikes your heat, guard crews
-  that shoot back, and a finale that needs you to arrive clean.
+- **Six-contract story** in three chapters, with briefings and dialogue —
+  and no two jobs work the same way: one pickup only completes from the
+  bed of a pickup truck, one contract ends in a boat run through sea
+  gates to the Sunstrand pier, one is a timed escape under forced heat
+  with a safehouse finish, plus timed archive runs, guard crews that
+  shoot back, and a finale that needs you to arrive clean.
 - **Wanted system** — a casualty ledger drives one to five stars; police
   answer on foot and by car, and at three stars the helicopters join,
   sweeping a searchlight over you at night. At four and five stars, parked
   police cars seal the road ahead of you as a roadblock — ram through it or
   find another street. Break line of sight and let the search bar drain.
+  Round 4 widens the law: ramming a patrol car or stealing a car in front
+  of one scores instantly, while light offences — collisions, scraped
+  property — are only recorded. Three records inside 45 seconds file a
+  witness report: it lands 3 seconds later, and only if you are still
+  near the scene, so breaking away kills it. From three stars, the first
+  unit dispatched runs interceptor — it races to a point ahead of your
+  line and waits across it instead of chasing your tail.
 - **Side money** — taxi fares with time bonuses (your passenger rides in the
   back seat), 20 Dusk Shells on the coast, four shop robberies worked as a
   hold-E channel — let go of the key and the job dies — a chop shop in Port

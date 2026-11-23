@@ -808,11 +808,11 @@
     car.x = -40; car.z = -124.6; car.ang = Math.PI / 2; car.driver = false; car.parked = false; car.speed = 24;
     p.mode = 'car'; p.carId = 0; p.x = car.x; p.z = car.z; p.ang = Math.PI / 2; p.speedNow = 24;
     S.race = {
-      name: D.RACES[0].name, gates: D.RACES[0].gates, next: 3, time: 12.4, par: D.RACES[0].par,
-      rival: { x: -33, z: -131.4, ang: Math.PI / 2, speed: 24, next: 3 },
+      name: D.RACES[0].name, gates: D.RACES[0].gates, next: 3, time: 12.4, par: D.racePar([D.RACES[0].start, ...D.RACES[0].gates]),
+      rival: { x: -37, z: -126.9, ang: Math.PI / 2, speed: 24, next: 3 },
     };
     // traffic ahead on the same avenue, so the frame has depth
-    const spots = [[28, -124.6, Math.PI / 2], [58, -131.4, Math.PI / 2]];
+    const spots = [[40, -124.6, Math.PI / 2], [75, -131.4, Math.PI / 2]];
     let n = 0;
     for (const c of S.cars) {
       if (!c.driver || c.type === 'bike' || c.id === 0) continue;
@@ -820,7 +820,7 @@
       c.x = s[0]; c.z = s[1]; c.ang = s[2]; c.speed = 14;
       c.axis = 'EW'; c.road = 1; c.dir = 1; c.along = s[0];
     }
-    ui.camYaw = Math.PI / 2; ui.camDist = 11;
+    ui.camYaw = Math.PI / 2; ui.camDist = 9;
   }
   function stageHeliPort() {
     const p = S.player;
@@ -850,18 +850,26 @@
       const c = drivers.find(q => q.type === t && !ordered.includes(q));
       if (c) ordered.push(c);
     }
-    const spots = [[-124.6, 4, 0], [-124.6, 14.5, 0], [-124.6, 24, 0], [-131.4, 18, Math.PI]];
+    // the block sits south of the junction: the corner lamp at (-117.8, 14)
+    // would otherwise hang its additive halo six units from the camera
+    const spots = [[-124.6, -10, 0], [-124.6, 0.5, 0], [-124.6, 10, 0], [-131.4, 4, Math.PI]];
     ordered.forEach((c, n) => {
       const s = spots[n]; if (!s) return;
       c.x = s[0]; c.z = s[1]; c.ang = s[2]; c.speed = 0;
       c.axis = 'NS'; c.road = 0; c.dir = s[2] === 0 ? 1 : -1; c.along = s[1];
     });
-    p.mode = 'foot'; p.x = -121.6; p.z = 8.5; p.y = 0; p.ang = 0.5; p.speedNow = 0;
+    p.mode = 'foot'; p.x = -121.6; p.z = -5.5; p.y = 0; p.ang = 0.5; p.speedNow = 0;
+    // clear stray traffic out of the block: a wandering car stopped beside
+    // the camera fills the frame with its own headlight beam
+    for (const c of S.cars) {
+      if (ordered.includes(c) || c.id === 0) continue;
+      if ((c.x + 121) ** 2 + (c.z + 2) ** 2 < 32 * 32) { c.x = 100; c.z = -100; c.axis = 'EW'; c.road = 3; c.along = 100; }
+    }
     let m = 0;
     for (const pd of S.peds) {
       if (m >= 10 || pd.state === 'down') continue;
       pd.x = -120.6 + (m % 3) * 0.8;
-      pd.z = 2 + m * 3.4;
+      pd.z = -12 + m * 3.4;
       pd.ang = Math.PI - 0.3;
       m++;
     }
@@ -870,9 +878,11 @@
   function stageBoatRun() {
     const p = S.player;
     const boat = boatStates[0];
-    boat.x = 238; boat.z = 47; boat.ang = -Math.PI / 2; boat.speed = 9;
-    p.mode = 'boat'; p.boatId = 0; p.x = boat.x; p.z = boat.z; p.ang = -Math.PI / 2; p.speedNow = 9;
-    ui.camYaw = -Math.PI / 2; ui.camDist = 11;
+    // offshore and angled toward the pier, so the frame is water, beach
+    // and skyline — not the pier deck filling the foreground
+    boat.x = 256; boat.z = 66; boat.ang = -Math.PI / 2 + 0.3; boat.speed = 9;
+    p.mode = 'boat'; p.boatId = 0; p.x = boat.x; p.z = boat.z; p.ang = boat.ang; p.speedNow = 9;
+    ui.camYaw = boat.ang; ui.camDist = 9;
   }
   function applyShot(name) {
     const p = S.player;
