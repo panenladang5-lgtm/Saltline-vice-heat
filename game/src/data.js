@@ -205,12 +205,15 @@ function pedPos(p) {
 const VEHICLE_STATS = {
   sedan: { accel: 19, top: 29 }, sport: { accel: 24, top: 38 },
   van: { accel: 14, top: 29 }, taxi: { accel: 19, top: 29 },
+  pickup: { accel: 16, top: 27 }, compact: { accel: 20, top: 30 },
   bike: { accel: 27, top: 34, steer: 2.4 },
 };
 function vehicleTypeFor(n) {
   if (n % 11 === 10) return 'van';
   if (n % 7 === 6) return 'taxi';
   if (n % 5 === 4) return 'sport';
+  if (n % 9 === 8) return 'pickup';
+  if (n % 6 === 5) return 'compact';
   return 'sedan';
 }
 function genVehicles(seed) {
@@ -312,7 +315,7 @@ function taxiDestination(spotIdx, seq) {
   return idx;
 }
 function robberyPay(shopIdx, count) { return 120 + ((shopIdx * 37 + count * 53) % 81); }
-const CHOP_PAY = { sedan: 80, taxi: 80, sport: 180, van: 120 };
+const CHOP_PAY = { sedan: 80, taxi: 80, sport: 180, van: 120, pickup: 120, compact: 80 };
 function chopEligible(car) {
   return !!car && !car.police && !car.service && car.type !== 'bike' && !car.mission && !car.owned && !!car.stolen;
 }

@@ -197,16 +197,28 @@ const SLA = (() => {
     const g = new THREE.Group();
     const b = new Batch(), glow = new Batch();
     const isSport = type === 'sport', isVan = type === 'van';
-    const L = isVan ? 4.9 : isSport ? 4.3 : 4.4, W = isVan ? 2.0 : isSport ? 1.9 : 2.0;
-    const bodyH = isVan ? 1.15 : 0.55, baseY = isVan ? 0.95 : 0.62;
+    const isPickup = type === 'pickup', isCompact = type === 'compact';
+    const L = isVan ? 4.9 : isSport ? 4.3 : isCompact ? 3.6 : 4.4, W = isVan ? 2.0 : isSport ? 1.9 : isCompact ? 1.8 : 2.0;
+    const bodyH = isVan ? 1.15 : isPickup ? 0.6 : 0.55, baseY = isVan ? 0.95 : 0.62;
     const paintHex = opts.police ? 0xeff0eb : type === 'taxi' ? 0xfebd46 : colorHex;
     const dark = new THREE.Color(paintHex).multiplyScalar(0.58).getHex();
     b.box(W, bodyH, L, paintHex, 0, baseY, 0); // main shell
     b.box(W * 0.94, bodyH * 0.5, L * 0.2, paintHex, 0, baseY - 0.08, L * 0.46); // nose
     b.box(W * 0.96, bodyH * 0.45, L * 0.16, paintHex, 0, baseY - 0.05, -L * 0.47); // tail
-    if (!isVan) {
-      b.box(W * 0.84, 0.48, L * 0.46, 0x395368, 0, baseY + bodyH / 2 + 0.24, -L * 0.04); // glass cabin
-      b.box(W * 0.8, 0.07, L * 0.4, paintHex, 0, baseY + bodyH / 2 + 0.51, -L * 0.04); // roof
+    if (isPickup) {
+      // cab sits over the front third; behind it an open cargo bed
+      b.box(W * 0.84, 0.52, L * 0.3, 0x395368, 0, baseY + bodyH / 2 + 0.26, L * 0.22); // cab glass
+      b.box(W * 0.8, 0.07, L * 0.27, paintHex, 0, baseY + bodyH / 2 + 0.55, L * 0.22); // cab roof
+      b.box(W * 0.92, 0.1, L * 0.46, dark, 0, baseY + 0.16, -L * 0.25); // bed floor
+      b.box(W * 0.06, 0.44, L * 0.46, paintHex, -W * 0.44, baseY + 0.33, -L * 0.25); // bed walls
+      b.box(W * 0.06, 0.44, L * 0.46, paintHex, W * 0.44, baseY + 0.33, -L * 0.25);
+      b.box(W * 0.92, 0.44, 0.07, paintHex, 0, baseY + 0.33, -L * 0.47); // tailgate
+      b.box(W * 0.66, 0.3, L * 0.28, 0x6b5136, 0, baseY + 0.36, -L * 0.26); // crates riding in the bed
+    } else if (!isVan) {
+      // hatchbacks carry their glasshouse further back than sedans
+      const cabLen = isCompact ? L * 0.58 : L * 0.46, cabZ = isCompact ? -L * 0.08 : -L * 0.04;
+      b.box(W * 0.84, 0.48, cabLen, 0x395368, 0, baseY + bodyH / 2 + 0.24, cabZ); // glass cabin
+      b.box(W * 0.8, 0.07, cabLen * 0.87, paintHex, 0, baseY + bodyH / 2 + 0.51, cabZ); // roof
     } else {
       b.box(W * 0.92, 0.5, L * 0.2, 0x395368, 0, baseY + bodyH / 2 + 0.22, L * 0.36); // van windshield band
       b.box(W + 0.02, 0.06, L * 0.7, dark, 0, baseY + 0.1, 0); // seam
@@ -248,7 +260,7 @@ const SLA = (() => {
     g.add(bodyMesh);
     g.add(glow.build(MAT_BASIC(), false));
     const wheels = [];
-    const wr = isVan ? 0.38 : 0.34;
+    const wr = isVan ? 0.38 : isCompact ? 0.3 : 0.34;
     for (const [wx, wz] of [[-W / 2 + 0.08, L * 0.31], [W / 2 - 0.08, L * 0.31], [-W / 2 + 0.08, -L * 0.31], [W / 2 - 0.08, -L * 0.31]]) {
       const wm = wheelMesh(wr);
       wm.position.set(wx, wr, wz);
