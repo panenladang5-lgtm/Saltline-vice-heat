@@ -425,7 +425,8 @@ const SLW = (() => {
           float foam = foamBand * (0.5 + 0.5 * sin(vW.x * 0.8 + vW.z * 0.6 + time * 1.7));
           col = mix(col, vec3(0.9, 0.95, 0.95), clamp(foam, 0.0, 1.0) * 0.5);
           float glit = pow(max(0.0, sin(vW.x * 1.7 + time * 2.0) * sin(vW.z * 1.9 - time * 1.6)), 12.0);
-          col += vec3(1.0, 0.9, 0.7) * glit * 0.55;
+          float gmask = 0.35 + 0.65 * (0.5 + 0.5 * sin(vW.x * 0.21 + time * 0.3) * sin(vW.z * 0.17 - time * 0.22));
+          col += vec3(1.0, 0.9, 0.7) * glit * 0.55 * gmask;
           float sheen = pow(max(0.0, sin(vW.x * 0.55 - time * 0.9) * sin(vW.z * 0.5 + time * 0.7)), 6.0);
           col += vec3(1.0, 0.72, 0.45) * sheen * 0.09;
           gl_FragColor = vec4(col, 1.0);

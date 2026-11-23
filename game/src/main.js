@@ -764,7 +764,7 @@
   // painted exactly as they are in play.
   function stageStreetLife() {
     // a busy block around the cover scene: queued traffic both ways
-    const spots = [[3.4, 66, 0], [-3.4, 18, Math.PI], [3.4, 6, 0], [-3.4, 78, Math.PI], [3.4, 92, 0]];
+    const spots = [[3.4, 58, 0], [-3.4, 24, Math.PI], [3.4, 74, 0], [-3.4, 84, Math.PI], [3.4, 92, 0]];
     let n = 0;
     for (const c of S.cars) {
       if (!c.driver || c.type === 'bike') continue;
@@ -772,11 +772,12 @@
       c.x = s[0]; c.z = s[1]; c.ang = s[2]; c.speed = 0;
       c.axis = 'NS'; c.road = 3; c.dir = s[2] === 0 ? 1 : -1; c.along = s[1];
     }
-    // pedestrians strolling the same block
+    // pedestrians on both sidewalks of the same block
     let m = 0;
     for (const pd of S.peds) {
       if (m >= 14 || pd.state === 'down') continue;
-      pd.x = -7.5 + (m % 7) * 2.7; pd.z = 28 + Math.floor(m / 7) * 18 + (m % 3);
+      pd.x = (m % 2 ? -1 : 1) * (6.4 + (m % 5) * 0.85);
+      pd.z = 24 + Math.floor(m / 2) * 7.5 + (m % 3);
       pd.ang = m % 2 ? 0.4 : Math.PI - 0.4;
       m++;
     }
@@ -786,7 +787,7 @@
     const car = S.cars[0];
     car.x = 188.6; car.z = 96; car.ang = Math.PI; car.driver = false; car.parked = false; car.speed = 23;
     p.mode = 'car'; p.carId = 0; p.x = car.x; p.z = car.z; p.ang = Math.PI; p.speedNow = 23;
-    const spots = [[188.6, 56, Math.PI], [188.6, 26, Math.PI], [195.4, 62, 0], [195.4, 128, 0]];
+    const spots = [[188.6, 74, Math.PI], [188.6, 40, Math.PI], [188.6, 12, Math.PI], [195.4, 62, 0], [195.4, 128, 0]];
     let n = 0;
     for (const c of S.cars) {
       if (!c.driver || c.type === 'bike' || c.id === 0) continue;
@@ -817,7 +818,7 @@
     const p = S.player;
     S.weather.storm = false; S.weather.intensity = 0; S.stormI = 0;
     if (name === 'mission-day') {
-      S.hours = 17.8; p.x = 6.2; p.z = 44; p.ang = Math.PI + 0.3; ui.camYaw = Math.PI + 0.3; ui.camDist = 12;
+      S.hours = 17.35; p.x = 5.4; p.z = 46; p.ang = Math.PI + 0.3; ui.camYaw = Math.PI + 0.3; ui.camDist = 11;
     } else if (name === 'driving') {
       S.hours = 16.9; ui.camDist = 10;
     } else if (name === 'night-heli') {
@@ -826,14 +827,14 @@
       S.wanted.episode = true; S.wanted.ledger = 9; S.wanted.search = 1;
       ui.camYaw = 2.6;
     } else if (name === 'beach') {
-      S.hours = 18.12; p.x = 240; p.z = 42; p.ang = Math.PI / 2; ui.camYaw = Math.PI / 2 - 0.5; ui.camDist = 12;
+      S.hours = 17.9; p.x = 213; p.z = 30; p.ang = Math.PI / 2; ui.camYaw = Math.PI / 2 - 0.55; ui.camDist = 11;
     }
     const neutral = { moveX: 0, moveZ: 0, sprint: false, fire: false, handbrake: false, enterPressed: false, interactPressed: false, reloadPressed: false, weaponPressed: false, jumpPressed: false, interactHeld: false };
     for (let i = 0; i < 170; i++) sim.step(1 / 60, neutral);
     if (name === 'mission-day') stageStreetLife();
     if (name === 'driving') stageCoastalDrive();
     if (name === 'night-heli') stageChase();
-    if (name === 'beach') { p.x = 240; p.z = 42; p.y = 1.0; }
+    if (name === 'beach') { p.x = 213; p.z = 30; p.y = 0; }
     S.starsCache = sim.stars();
     const objective = computeObjective();
     processEvents();
