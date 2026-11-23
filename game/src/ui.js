@@ -3,10 +3,11 @@
    The sim stays DOM-free; this module translates events and state to pixels. */
 const SLU = (() => {
   const HELP_TEXT = `WASD move · mouse drag look · click fire
-Shift sprint · Space jump · E interact · F or Enter: enter / exit car
+Shift sprint · Space jump · E interact · F or Enter: enter / exit car or boat
 R reload · Q swap weapon · M map · Esc pause
 
-Story: take contracts from Mara at the dispatch office (pink M). Finish all six to close the story. Side money: taxi fares, Dusk Shells, shop robberies, the chop shop, street races and the Coast Run. Wanted: fill the search bar's drain by staying unseen; Mara can cut a search for $50. Nico's garage (orange N) repairs; the clinic sells health, armour and ammo.`;
+Story: take contracts from Mara at the dispatch office (pink M). Finish all six to close the story. Side money: taxi fares, Dusk Shells, shop robberies, the chop shop, street races and the Coast Run — their starts are dotted on the map. Boats wait at the Sunstrand piers: walk out along the pier and press F.
+Wanted: stay unseen and the search bar drains to zero. Light offences are only recorded — three records inside 45 seconds file a witness report that lands 3 seconds later, and only if you are still near the scene, so break away. From three stars the first police unit runs interceptor, ahead of your line; helicopters track you at night only while their searchlight can actually see you. Mara can cut a search for $50; Nico fits clean plates that drop a star. Nico's garage (orange N) repairs; the clinic sells health, armour and ammo.`;
 
   function el(tag, cls, parent, html) {
     const e = document.createElement(tag);
@@ -274,6 +275,24 @@ Story: take contracts from Mara at the dispatch office (pink M). Finish all six 
       completeEl.style.display = 'block';
       setTimeout(() => { completeEl.style.display = 'none'; }, 5000);
     };
+    ui.showEndCard = (S, D) => {
+      // the finale's full stop: the completion banner plus the run's
+      // numbers, on the same stat grid the pause screen uses. Shown only
+      // once the closing dialogue has closed (main defers it), so its
+      // timer never burns behind a modal.
+      const st = S.stats;
+      const rows = [
+        ['Contracts', `${S.story.done} / 6`], ['Earned', `$${st.earned}`],
+        ['Distance', `${(st.distance / 1000).toFixed(2)} km`], ['Shells', `${S.shellsGot.size} / 20`],
+        ['Races won', `${st.races}`], ['Days on the coast', `${S.day}`],
+      ];
+      let grid = '';
+      for (const [k, v] of rows) grid += `<div>${k}</div><div style="text-align:right">${v}</div>`;
+      completeEl.innerHTML = `<h2>VICE HEAT — COMPLETE</h2>` +
+        `<div class="stat-grid" style="max-width:340px;margin:10px auto 0;background:rgba(6,16,24,.72);padding:10px 14px;text-align:left">${grid}</div>`;
+      completeEl.style.display = 'block';
+      setTimeout(() => { completeEl.style.display = 'none'; }, 9000);
+    };
     ui.flash = () => { flashEl.style.opacity = '1'; setTimeout(() => { flashEl.style.opacity = '0'; flashEl.style.transition = 'opacity .5s'; }, 60); };
     ui.hitFlash = () => { // taking damage: a shorter, softer pulse than death's
       flashEl.style.transition = 'none'; flashEl.style.opacity = '0.45';
@@ -475,6 +494,10 @@ Story: take contracts from Mara at the dispatch office (pink M). Finish all six 
       ringDot(D.SITES.clinic.x, D.SITES.clinic.z, '#72e5bb', big ? 5 : 3.2);
       ringDot(D.SITES.home.x, D.SITES.home.z, '#8bbcff', big ? 5 : 3.2);
       ringDot(D.SITES.chop.x, D.SITES.chop.z, '#f8cf69', big ? 5 : 3.2);
+      // race starts + the Coast Run point: the activities a new player
+      // would otherwise never find (they had no sign and no dot)
+      for (const r of D.RACES) ringDot(r.start.x, r.start.z, '#ff7847', big ? 5 : 3.2);
+      ringDot(D.SITES.trial.x, D.SITES.trial.z, '#53e08a', big ? 5 : 3.2);
       // taxi: waiting passenger, then the fare destination
       if (S.taxi) {
         if (S.taxi.phase === 'fare') {
@@ -521,7 +544,7 @@ Story: take contracts from Mara at the dispatch office (pink M). Finish all six 
       ctx.fillText('N', size - (big ? 20 : 15), big ? 18 : 14);
       if (big) {
         ctx.fillStyle = '#e8f1f2'; ctx.font = '11px Verdana';
-        ctx.fillText('M Mara · N Nico · + Clinic · H Home · $ Chop · ◆ Objective', 10, size - 10);
+        ctx.fillText('M Mara · N Nico · + Clinic · H Home · $ Chop · ● Race · ● Coast Run · ◆ Objective', 10, size - 10);
       }
     }
     ui.drawMinimap = (S, D) => drawMap(minimap.getContext('2d'), 168, S, D, false);

@@ -286,7 +286,7 @@
   }
 
   // ---------------- UI + hooks ----------------
-  let objPos = null, pendingChapter = -1, hasSaveAtBoot = false;
+  let objPos = null, pendingChapter = -1, pendingComplete = false, hasSaveAtBoot = false;
   try { hasSaveAtBoot = !!localStorage.getItem(D.SAVE_KEY); } catch { hasSaveAtBoot = false; }
   const ui = SLU.createUI({
     audioKick: () => { audio.ensure(); if (S.settings.music) audio.radio(true); },
@@ -363,6 +363,7 @@
       if (st.kind === 'escape') html += `<br>Search: ${Math.round(S.wanted.search * 100)}%`;
     } else if (S.story.active === null && S.story.done < 6) {
       html = `See <b>Mara</b> at the dispatch office (pink M) — contract ${S.story.done + 1} of 6.`;
+      html += '<br>Street races: <b>Avenida Sprint</b> · <b>Port Run</b> · <b>Coast Run</b> — dotted on the map.';
     } else if (S.story.done >= 6) {
       html = 'Story complete. The city is yours — fares, shells, races, robberies.';
     }
@@ -384,10 +385,11 @@
       else if (e.k === 'lightning') audio.play('thunder');
       else if (e.k === 'brief') ui.showBrief(e.txt);
       else if (e.k === 'chapter') pendingChapter = e.idx;
-      else if (e.k === 'storycomplete') { ui.showComplete(); ui.toast('All six contracts closed. Free roam is yours.'); }
+      else if (e.k === 'storycomplete') pendingComplete = true; // deferred like the chapter card: shown after the closing dialogue, never behind it
       else if (e.k === 'dialogue') {
         ui.showDialogue(e.lines, e.title, () => {
           if (pendingChapter >= 0) { ui.showChapter(D, pendingChapter); pendingChapter = -1; }
+          if (pendingComplete) { pendingComplete = false; ui.showEndCard(S, D); ui.toast('All six contracts closed. Free roam is yours.'); }
         });
       }
       else if (e.k === 'clinic') ui.openShop(S, D);
@@ -404,6 +406,9 @@
       }
       else if (e.k === 'guardspawn') rebuildGuardFigs();
     }
+    // a story completion that arrived with no dialogue in front of it
+    // still gets its card immediately
+    if (pendingComplete && !ui.modalOpen) { pendingComplete = false; ui.showEndCard(S, D); ui.toast('All six contracts closed. Free roam is yours.'); }
   }
   function rebuildGuardFigs() {
     for (const f of guardFigs) scene.remove(f.group);

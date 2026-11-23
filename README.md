@@ -7,7 +7,8 @@
 An open-world crime game that runs entirely in the browser, offline, from
 static files. You are a runner on the Saltline coast: take contracts from
 Mara at the dispatch office, move packages, cars and worse across six
-districts, and close all six contracts before the city closes on you.
+districts, and close all six contracts to bring the Port Sol archive into
+the open.
 
 Entry for the make.fun bounty [gta6-01](https://make.fun/c/gta6-01) —
 bounty page: [make.fun/bounty/gta6-01](https://make.fun/bounty/gta6-01).
@@ -18,9 +19,10 @@ One seeded, deterministic city: 131 buildings, 98 street lamps that wake up
 into a full night-lighting layer after dark, 720 pedestrians, 78 vehicles
 with working traffic, traffic lights and night parking. The fleet reads at
 a glance — sedans, sport coupes, vans, taxis, pickups with loaded beds and
-compact hatchbacks — drivers sit inside translucent cabins, headlights
-throw true beams down the road after dark, and the residents stand at
-honest adult scale beside the cars. The buildings carry their own signage: glazed
+compact hatchbacks — in the sedans, coupes, taxis, pickups and hatchbacks
+the drivers sit inside translucent cabins, visible through the glass (the
+van keeps its steel sides), headlights throw true beams down the road
+after dark, and the residents stand at honest adult scale beside the cars. The buildings carry their own signage: glazed
 shopfronts, blade signs over the pavement, lit panels on the tower roofs.
 After dark a second layer of lit windows switches on, so the towers feel
 lived in. Six districts —
@@ -70,7 +72,9 @@ earn shop discounts, spill blood and it collapses.
   street map — districts, piers, your objective, your fare and every police
   unit on it.
 - **Save anywhere** — progress, standing, shells, records and your car are
-  kept in the browser and restored on Continue.
+  kept in the browser and restored on Continue. Saving only ever happens
+  inside a started session, so opening the game and closing the tab at the
+  title screen can never overwrite an existing save.
 
 ## Controls
 
@@ -89,7 +93,8 @@ earn shop discounts, spill blood and it collapses.
 | Esc or P | Pause (stats, save, radio, volume) |
 
 Touch controls appear on touch devices. The simulation steps at a fixed
-60 Hz under a 30 fps presentation cap, so it plays the same on any machine.
+60 Hz under a 30 fps presentation cap, so timing and physics feel the same
+on any machine.
 
 ## Running it
 

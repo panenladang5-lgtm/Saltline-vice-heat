@@ -375,6 +375,10 @@ const SLW = (() => {
       ['DISPATCH', D.SITES.mara, 0xf77f80], ['GARAGE', D.SITES.nico, 0xf1ad5e],
       ['CLINIC', D.SITES.clinic, 0x72e5bb], ['HOME', D.SITES.home, 0x8bbcff],
       ['CHOP SHOP', D.SITES.chop, 0xf8cf69],
+      // the race starts and the trial point get street furniture too —
+      // they were the only activities with no sign anywhere in the world
+      ['RACE', D.RACES[0].start, 0xd92b3a], ['RACE', D.RACES[1].start, 0xd92b3a],
+      ['COAST RUN', D.SITES.trial, 0x3cc8cf],
     ];
     for (const [txt, site, acc] of siteSigns) {
       const s = makeSign(txt, acc, 4.6, 1.2);
