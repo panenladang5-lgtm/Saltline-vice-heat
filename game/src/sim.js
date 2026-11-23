@@ -834,6 +834,21 @@ const SLS = (() => {
       if (tx.phase === 'wait') {
         tx.nextIn -= dt;
         if (tx.nextIn <= 0 && !tx.passengerOut) { tx.passengerOut = true; }
+        if (tx.passengerOut && p.carId >= 0 && p.speedNow < 1) {
+          const spot = D.TAXI_SPOTS[tx.spot];
+          if (dist(p, spot) < 6.5) {
+            tx.dest = D.taxiDestination(tx.spot, tx.seq);
+            const dest = D.TAXI_SPOTS[tx.dest];
+            tx.routeLen = D.roadRouteLength(spot, dest);
+            tx.fare = D.taxiFare(tx.routeLen);
+            tx.timeTotal = D.taxiTimeLimit(tx.routeLen);
+            tx.timeLeft = tx.timeTotal;
+            tx.phase = 'fare';
+            tx.passengerOut = false;
+            toast(`Fare aboard — bound for ${D.districtAt(dest.x, dest.z)}, $${Math.round(tx.fare)} on the meter.`);
+            emit({ k: 'sfx', name: 'pickup' });
+          }
+        }
       } else if (tx.phase === 'fare') {
         tx.timeLeft -= dt;
         const destSpot = D.TAXI_SPOTS[tx.dest];
