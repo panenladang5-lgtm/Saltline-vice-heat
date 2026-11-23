@@ -265,7 +265,7 @@ Story: take contracts from Mara at the dispatch office (pink M). Finish all six 
     };
     ui.showChapter = (D, idx) => {
       const ch = D.CHAPTERS[idx];
-      chapterInner.innerHTML = `<h2>CHAPTER ${idx + 1} — ${ch.name}</h2><p>${ch.tagline}</p>`;
+      chapterInner.innerHTML = `<h2>${ch.name}</h2><p>${ch.closing}</p>`;
       chapterEl.style.display = 'flex';
       setTimeout(() => { chapterEl.style.display = 'none'; }, 3600);
     };
@@ -417,27 +417,36 @@ Story: take contracts from Mara at the dispatch office (pink M). Finish all six 
 
     // ---------- maps ----------
     const DISTRICT_COLORS = {
-      'OLD QUARTER': '#3d5a4a', 'GLASS DISTRICT': '#33566e', 'CORAL HEIGHTS': '#6e4a3a',
-      'LITTLE PALM': '#5d6e35', 'PORT SOL': '#54486e', 'SUNSTRAND BEACH': '#8a7a45',
+      'OLD QUARTER': '#4d7d60', 'GLASS DISTRICT': '#41779c', 'CORAL HEIGHTS': '#9c664c',
+      'LITTLE PALM': '#7d9845', 'PORT SOL': '#6f5da0', 'SUNSTRAND BEACH': '#bfa155',
     };
     function paintBase(ctx, size, D) {
-      ctx.fillStyle = '#274b63'; ctx.fillRect(0, 0, size, size);
+      ctx.fillStyle = '#2e6284'; ctx.fillRect(0, 0, size, size);
       const w2m = (v) => (v + 230) / 460 * size;
       // land
-      ctx.fillStyle = '#2c4638'; ctx.fillRect(0, 0, w2m(222), size);
+      ctx.fillStyle = '#3a5c44'; ctx.fillRect(0, 0, w2m(222), size);
       // districts
       const step = 460 / 28;
       for (let i = 0; i < 28; i++) for (let j = 0; j < 28; j++) {
         const x = -230 + i * step + step / 2, z = -230 + j * step + step / 2;
         if (x > 198) continue;
-        ctx.fillStyle = DISTRICT_COLORS[D.districtAt(x, z)] || '#2c4638';
+        ctx.fillStyle = DISTRICT_COLORS[D.districtAt(x, z)] || '#3a5c44';
         ctx.fillRect(w2m(x - step / 2), w2m(z - step / 2), step + 1, step + 1);
       }
       // beach sand
-      ctx.fillStyle = '#c9b183'; ctx.fillRect(w2m(198), 0, w2m(224) - w2m(198), size);
-      // roads
-      ctx.strokeStyle = 'rgba(230,238,240,.55)'; ctx.lineWidth = Math.max(1, size / 220);
+      ctx.fillStyle = '#dcc48f'; ctx.fillRect(w2m(198), 0, w2m(224) - w2m(198), size);
+      // piers
+      ctx.strokeStyle = '#8a6b4f'; ctx.lineWidth = Math.max(1.2, size / 190);
+      for (const pz of D.PIERS) {
+        ctx.beginPath(); ctx.moveTo(w2m(226), w2m(pz)); ctx.lineTo(w2m(252), w2m(pz)); ctx.stroke();
+      }
+      // roads: dark casing first, then a bright centre line, so the grid
+      // reads at minimap size as well as on the big map
       for (const r of D.ROADS) {
+        ctx.strokeStyle = 'rgba(16,24,32,.65)'; ctx.lineWidth = Math.max(2.4, size / 95);
+        ctx.beginPath(); ctx.moveTo(w2m(r), 0); ctx.lineTo(w2m(r), size); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, w2m(r)); ctx.lineTo(w2m(222), w2m(r)); ctx.stroke();
+        ctx.strokeStyle = 'rgba(238,244,246,.92)'; ctx.lineWidth = Math.max(1.1, size / 200);
         ctx.beginPath(); ctx.moveTo(w2m(r), 0); ctx.lineTo(w2m(r), size); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(0, w2m(r)); ctx.lineTo(w2m(222), w2m(r)); ctx.stroke();
       }
@@ -447,15 +456,33 @@ Story: take contracts from Mara at the dispatch office (pink M). Finish all six 
       const w2m = paintBase(ctx, size, D);
       const p = S.player;
       const dot = (x, z, color, r) => { ctx.fillStyle = color; ctx.beginPath(); ctx.arc(w2m(x), w2m(z), r, 0, 7); ctx.fill(); };
+      const ringDot = (x, z, color, r) => {
+        ctx.fillStyle = color; ctx.beginPath(); ctx.arc(w2m(x), w2m(z), r, 0, 7); ctx.fill();
+        ctx.strokeStyle = 'rgba(8,14,20,.85)'; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.arc(w2m(x), w2m(z), r, 0, 7); ctx.stroke();
+      };
       // sites
-      dot(D.SITES.mara.x, D.SITES.mara.z, '#f77f80', big ? 5 : 3);
-      dot(D.SITES.nico.x, D.SITES.nico.z, '#f1ad5e', big ? 5 : 3);
-      dot(D.SITES.clinic.x, D.SITES.clinic.z, '#72e5bb', big ? 5 : 3);
-      dot(D.SITES.home.x, D.SITES.home.z, '#8bbcff', big ? 5 : 3);
-      dot(D.SITES.chop.x, D.SITES.chop.z, '#f8cf69', big ? 5 : 3);
-      // objective
+      ringDot(D.SITES.mara.x, D.SITES.mara.z, '#f77f80', big ? 5 : 3.2);
+      ringDot(D.SITES.nico.x, D.SITES.nico.z, '#f1ad5e', big ? 5 : 3.2);
+      ringDot(D.SITES.clinic.x, D.SITES.clinic.z, '#72e5bb', big ? 5 : 3.2);
+      ringDot(D.SITES.home.x, D.SITES.home.z, '#8bbcff', big ? 5 : 3.2);
+      ringDot(D.SITES.chop.x, D.SITES.chop.z, '#f8cf69', big ? 5 : 3.2);
+      // taxi: waiting passenger, then the fare destination
+      if (S.taxi) {
+        if (S.taxi.phase === 'fare') {
+          const d = D.TAXI_SPOTS[S.taxi.dest];
+          ringDot(d.x, d.z, '#3cc8cf', big ? 5 : 3.2);
+        } else if (S.taxi.passengerOut) {
+          const s = D.TAXI_SPOTS[S.taxi.spot];
+          ringDot(s.x, s.z, '#3cc8cf', big ? 5 : 3.2);
+        }
+      }
+      // objective: diamond inside a pulsing ring
       const obj = hooks.objectivePos ? hooks.objectivePos() : null;
       if (obj) {
+        const pulse = (big ? 10 : 7.5) + Math.sin(performance.now() / 240) * 1.6;
+        ctx.strokeStyle = 'rgba(255,217,77,.9)'; ctx.lineWidth = big ? 2 : 1.4;
+        ctx.beginPath(); ctx.arc(w2m(obj.x), w2m(obj.z), pulse, 0, 7); ctx.stroke();
         ctx.save();
         ctx.translate(w2m(obj.x), w2m(obj.z));
         ctx.rotate(Math.PI / 4);
@@ -468,13 +495,20 @@ Story: take contracts from Mara at the dispatch office (pink M). Finish all six 
       const flash = Math.floor(performance.now() / 300) % 2 === 0;
       for (const u of S.policeCars) if (u.active) dot(u.x, u.z, flash ? '#ff5040' : '#4080ff', big ? 4 : 2.5);
       for (const u of S.policeFoot) if (u.active) dot(u.x, u.z, flash ? '#ff5040' : '#4080ff', big ? 3.5 : 2);
-      // player arrow
+      if (S.blockCars) for (const u of S.blockCars) if (u.active) dot(u.x, u.z, flash ? '#ff5040' : '#4080ff', big ? 4.5 : 2.8);
+      // player arrow: dark outline first so it reads on any district colour
       ctx.save();
       ctx.translate(w2m(p.x), w2m(p.z));
       ctx.rotate(Math.PI - p.ang);
+      const ah = big ? 1 : 1.35;
+      ctx.fillStyle = 'rgba(8,14,20,.9)';
+      ctx.beginPath(); ctx.moveTo(0, -7.6 * ah); ctx.lineTo(5.2 * ah, 6.2 * ah); ctx.lineTo(0, 3.2 * ah); ctx.lineTo(-5.2 * ah, 6.2 * ah); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#ffffff';
-      ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(4.6, 5.6); ctx.lineTo(0, 2.8); ctx.lineTo(-4.6, 5.6); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(0, -7 * ah); ctx.lineTo(4.6 * ah, 5.6 * ah); ctx.lineTo(0, 2.8 * ah); ctx.lineTo(-4.6 * ah, 5.6 * ah); ctx.closePath(); ctx.fill();
       ctx.restore();
+      // north tick
+      ctx.fillStyle = 'rgba(232,241,242,.9)'; ctx.font = `bold ${big ? 12 : 10}px Verdana`;
+      ctx.fillText('N', size - (big ? 20 : 15), big ? 18 : 14);
       if (big) {
         ctx.fillStyle = '#e8f1f2'; ctx.font = '11px Verdana';
         ctx.fillText('M Mara · N Nico · + Clinic · H Home · $ Chop · ◆ Objective', 10, size - 10);
