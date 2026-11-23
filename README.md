@@ -9,14 +9,19 @@ static files. You are a runner on the Saltline coast: take contracts from
 Mara at the dispatch office, move packages, cars and worse across six
 districts, and close all six contracts before the city closes on you.
 
-Entry for the make.fun bounty [gta6-01](https://make.fun/c/gta6-01).
+Entry for the make.fun bounty [gta6-01](https://make.fun/c/gta6-01) —
+bounty page: [make.fun/bounty/gta6-01](https://make.fun/bounty/gta6-01).
 
 ## The city
 
 One seeded, deterministic city: 131 buildings, 98 street lamps that wake up
 into a full night-lighting layer after dark, 720 pedestrians, 78 vehicles
-with working traffic, traffic lights and night parking. After dark a second
-layer of lit windows switches on, so the towers feel lived in. Six districts —
+with working traffic, traffic lights and night parking. The fleet reads at
+a glance — sedans, sport coupes, vans, taxis, pickups with loaded beds and
+compact hatchbacks — and the buildings carry their own signage: glazed
+shopfronts, blade signs over the pavement, lit panels on the tower roofs.
+After dark a second layer of lit windows switches on, so the towers feel
+lived in. Six districts —
 Old Quarter, Glass District, Coral Heights, Little Palm, Port Sol and
 Sunstrand Beach — each with its own standing: finish contracts and fares to
 earn shop discounts, spill blood and it collapses.
@@ -34,14 +39,16 @@ earn shop discounts, spill blood and it collapses.
 - **Side money** — taxi fares with time bonuses (your passenger rides in the
   back seat), 20 Dusk Shells on the coast, four shop robberies worked as a
   hold-E channel — let go of the key and the job dies — a chop shop in Port
-  Sol that takes stolen civilian cars, two street races and the nine-gate
-  Coast Run time trial.
+  Sol that takes stolen civilian cars, two street races against a crimson
+  rival who runs the same gates on the same streets — first to the last
+  gate takes the purse — and the nine-gate Coast Run time trial.
 - **Crew** — Mara's lookout warns you about incoming units and can cut a
   search for $50; Nico fixes cars, sells a 2-second quick fix in the field
   and fits clean plates that drop a star.
 - **A living coast** — wadeable shallows with swimmers paddling off the
   piers, three boats at the piers, beach crowds that scatter when a storm
-  rolls in, tow trucks that haul wrecks and abandoned cars, ambulances that
+  rolls in — and when it does, the roads shine wet and dark puddles pool
+  along the avenues — tow trucks that haul wrecks and abandoned cars, ambulances that
   revive the fallen, fuel that burns, weather that turns, and a day that
   runs from dawn patrol to last ferry.
 - **Street life** — traffic runs the same light cycle you see on the

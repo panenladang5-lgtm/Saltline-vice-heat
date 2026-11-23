@@ -510,7 +510,7 @@
       refs.group.position.set(u.x, 0, u.z);
       refs.group.rotation.y = u.ang;
       const ph = Math.floor(performance.now() / 240) % 2;
-      refs.lightR.visible = ph === 0; refs.lightB.visible = ph !== 0;
+      if (refs.lightbar) { refs.lightbar.l.visible = ph === 0; refs.lightbar.r.visible = ph !== 0; }
     });
     S.policeFoot.forEach((u, i) => {
       const fig = policeFootFigs[i];
@@ -783,21 +783,27 @@
   // scene is composed by placing real entities, and the HUD + minimap are
   // painted exactly as they are in play.
   function stageStreetLife() {
-    // a busy block around the cover scene: queued traffic both ways
-    const spots = [[3.4, 58, 0], [-3.4, 24, Math.PI], [3.4, 74, 0], [-3.4, 84, Math.PI], [3.4, 92, 0]];
-    let n = 0;
-    for (const c of S.cars) {
-      if (!c.driver || c.type === 'bike') continue;
-      const s = spots[n++]; if (!s) break;
+    // a busy block around the cover scene: queued traffic both ways, with
+    // the fleet's shapes on show — a pickup and a hatchback join the queue
+    const spots = [[3.4, 30, 0], [-3.4, 12, Math.PI], [3.4, 16, 0], [-3.4, 34, Math.PI], [3.4, 40, 0], [-3.4, 52, Math.PI]];
+    const drivers = S.cars.filter(c => c.driver && c.type !== 'bike');
+    const ordered = [];
+    for (const t of ['pickup', 'compact', 'taxi']) {
+      const c = drivers.find(q => q.type === t && !ordered.includes(q));
+      if (c) ordered.push(c);
+    }
+    for (const c of drivers) { if (ordered.length >= spots.length) break; if (!ordered.includes(c)) ordered.push(c); }
+    ordered.forEach((c, n) => {
+      const s = spots[n]; if (!s) return;
       c.x = s[0]; c.z = s[1]; c.ang = s[2]; c.speed = 0;
       c.axis = 'NS'; c.road = 3; c.dir = s[2] === 0 ? 1 : -1; c.along = s[1];
-    }
+    });
     // pedestrians on both sidewalks of the same block
     let m = 0;
     for (const pd of S.peds) {
-      if (m >= 14 || pd.state === 'down') continue;
+      if (m >= 18 || pd.state === 'down') continue;
       pd.x = (m % 2 ? -1 : 1) * (6.4 + (m % 5) * 0.85);
-      pd.z = 24 + Math.floor(m / 2) * 7.5 + (m % 3);
+      pd.z = 10 + Math.floor(m / 2) * 5.6 + (m % 3);
       pd.ang = m % 2 ? 0.4 : Math.PI - 0.4;
       m++;
     }
@@ -805,9 +811,11 @@
   function stageCoastalDrive() {
     const p = S.player;
     const car = S.cars[0];
-    car.x = 188.6; car.z = 96; car.ang = Math.PI; car.driver = false; car.parked = false; car.speed = 23;
+    // start further south and angle the camera in, so the SUNSTRAND gate
+    // board sits whole inside the frame instead of cropped at its edge
+    car.x = 192; car.z = 124; car.ang = Math.PI; car.driver = false; car.parked = false; car.speed = 23;
     p.mode = 'car'; p.carId = 0; p.x = car.x; p.z = car.z; p.ang = Math.PI; p.speedNow = 23;
-    const spots = [[188.6, 74, Math.PI], [188.6, 40, Math.PI], [188.6, 12, Math.PI], [195.4, 62, 0], [195.4, 128, 0]];
+    const spots = [[188.6, 100, Math.PI], [188.6, 74, Math.PI], [195.4, 98, 0], [195.4, 142, 0], [188.6, 152, Math.PI]];
     let n = 0;
     for (const c of S.cars) {
       if (!c.driver || c.type === 'bike' || c.id === 0) continue;
@@ -815,7 +823,7 @@
       c.x = s[0]; c.z = s[1]; c.ang = s[2]; c.speed = 11;
       c.axis = 'NS'; c.road = 6; c.dir = s[2] === 0 ? 1 : -1; c.along = s[1];
     }
-    ui.camYaw = Math.PI;
+    ui.camYaw = Math.PI - 0.38;
   }
   function stageChase() {
     const p = S.player;
@@ -830,22 +838,43 @@
     });
     const f = S.policeFoot[0];
     if (f) { f.active = true; f.x = p.x + 4.5; f.z = p.z - 9; f.ang = Math.atan2(p.x - f.x, p.z - f.z); }
+    // at five stars the net closes: a roadblock unit parked across the road
+    const b = S.blockCars && S.blockCars[0];
+    if (b) { b.active = true; b.x = p.x + 1.5; b.z = p.z - 27; b.ang = Math.PI / 2; b.hp = 200; }
     const h = S.helis[0];
     h.x = p.x + 15; h.z = p.z - 24; h.y = 20; h.spotOn = true; h.mode = 'follow';
-    S.helis[1].spotOn = false;
+    const h2 = S.helis[1];
+    if (h2) { h2.x = p.x - 21; h2.z = p.z - 36; h2.y = 27; h2.spotOn = false; h2.mode = 'follow'; }
+  }
+  function stageStorm() {
+    const p = S.player;
+    const car = S.cars[0];
+    car.x = 3.4; car.z = 40; car.ang = Math.PI; car.driver = false; car.parked = false; car.speed = 19;
+    p.mode = 'car'; p.carId = 0; p.x = car.x; p.z = car.z; p.ang = Math.PI; p.speedNow = 19;
+    // the storm at full strength: rain, wet sheen, dark puddles
+    S.weather.storm = true; S.weather.intensity = 1; S.stormI = 1;
+    // a patrol car waiting ahead in the rain, and the heli's beam above
+    const u = S.policeCars[0];
+    if (u) { u.active = true; u.x = -3.4; u.z = 26; u.speed = 0; u.ang = Math.atan2(p.x - u.x, p.z - u.z); }
+    const h = S.helis[0];
+    if (h) { h.x = p.x + 16; h.z = p.z - 16; h.y = 21; h.spotOn = true; h.mode = 'follow'; }
   }
   function applyShot(name) {
     const p = S.player;
     S.weather.storm = false; S.weather.intensity = 0; S.stormI = 0;
     if (name === 'mission-day') {
-      S.hours = 17.35; p.x = 5.4; p.z = 46; p.ang = Math.PI + 0.3; ui.camYaw = Math.PI + 0.3; ui.camDist = 11;
+      S.hours = 17.35; p.x = 5.4; p.z = 44; p.ang = Math.PI + 0.3; ui.camYaw = Math.PI + 0.3; ui.camDist = 12;
     } else if (name === 'driving') {
       S.hours = 16.9; ui.camDist = 10;
     } else if (name === 'night-heli') {
       S.hours = 21.3;
       p.x = 3.4; p.z = 46; p.ang = 2.6;
+      S.wanted.episode = true; S.wanted.ledger = 12; S.wanted.search = 1;
+      ui.camYaw = 2.85;
+    } else if (name === 'storm') {
+      S.hours = 20.4;
       S.wanted.episode = true; S.wanted.ledger = 9; S.wanted.search = 1;
-      ui.camYaw = 2.6;
+      ui.camYaw = Math.PI + 0.25; ui.camDist = 9;
     } else if (name === 'beach') {
       S.hours = 17.9; p.x = 213; p.z = 30; p.ang = Math.PI / 2; ui.camYaw = Math.PI / 2 - 0.55; ui.camDist = 11;
     }
@@ -854,6 +883,7 @@
     if (name === 'mission-day') stageStreetLife();
     if (name === 'driving') stageCoastalDrive();
     if (name === 'night-heli') stageChase();
+    if (name === 'storm') stageStorm();
     if (name === 'beach') { p.x = 213; p.z = 30; p.y = 0; }
     S.starsCache = sim.stars();
     const objective = computeObjective();
