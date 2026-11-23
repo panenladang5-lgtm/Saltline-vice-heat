@@ -30,7 +30,7 @@ const SLS = (() => {
       policeCars: [], policeFoot: [], helis: [],
       taxi: { phase: 'wait', spot: 0, seq: 0, dest: -1, fare: 0, timeLeft: 0, routeLen: 0, nextIn: 0, carId: -1 },
       blockCars: [], blockCd: 0, blocksSet: 0, lightPhase: 0,
-      race: null, coast: null,
+      race: null, raceResult: null, coast: null,
       robbery: D.ROBBERY_SHOPS.map(() => ({ count: 0, cd: 0 })),
       robHold: null, channel: null,
       cooldowns: { quickFix: 0, cleanPlate: 0, lookout: 0 },
@@ -312,6 +312,20 @@ const SLS = (() => {
             if (S.wanted.episode || Math.abs(car.speed) > 12) crime('collision');
             emit({ k: 'sfx', name: 'bump' });
           }
+        }
+      }
+      // the race rival is solid too: trade paint and you both shed speed
+      if (S.race && S.race.rival && !S.race.rival.done) {
+        const rv = S.race.rival;
+        const d2 = (rv.x - car.x) ** 2 + (rv.z - car.z) ** 2;
+        if (d2 < 9.5 && d2 > 0.01) {
+          const d = Math.sqrt(d2);
+          const push = (3.1 - d) / 2;
+          const ux = (rv.x - car.x) / d, uz = (rv.z - car.z) / d;
+          if (rv.axis === 'NS') rv.along += uz * push; else rv.along += ux * push;
+          placeRival(rv);
+          car.x -= ux * push * 0.5; car.z -= uz * push * 0.5;
+          if (Math.abs(car.speed) > 5) { car.speed *= 0.82; rv.speed = Math.min(rv.speed, Math.abs(car.speed)); emit({ k: 'sfx', name: 'bump' }); }
         }
       }
       // roadblock units are solid: ramming one costs speed and hull, and a
@@ -1000,7 +1014,8 @@ const SLS = (() => {
           }
         }
       }
-      // races
+      // races: you against the crimson rival, same gates, same streets —
+      // whoever crosses the last gate first takes the prize
       if (S.race) {
         const r = S.race;
         r.time += dt;
@@ -1011,19 +1026,19 @@ const SLS = (() => {
           if (r.next >= r.gates.length) {
             const rec = S.raceRecords[r.name] || { best: 0, wins: 0 };
             const first = rec.wins === 0;
-            if (r.time <= r.par) {
-              const pay = first ? 150 : 60;
-              p.money += pay; S.stats.earned += pay; S.stats.races++;
-              rec.wins++;
-              if (first) { const dn = D.districtAt(p.x, p.z); S.standing[dn] = Math.min(100, S.standing[dn] + 4); }
-              toast(`${r.name} won in ${r.time.toFixed(1)}s (par ${r.par.toFixed(1)}s) — +$${pay}.`);
-            } else toast(`${r.name} finished ${r.time.toFixed(1)}s — over par ${r.par.toFixed(1)}s, no prize.`);
+            const pay = first ? 150 : 60;
+            p.money += pay; S.stats.earned += pay; S.stats.races++;
+            rec.wins++;
+            if (first) { const dn = D.districtAt(p.x, p.z); S.standing[dn] = Math.min(100, S.standing[dn] + 4); }
+            toast(`${r.name} won in ${r.time.toFixed(1)}s — you beat the rival home (par ${r.par.toFixed(1)}s). +$${pay}.`);
             if (!rec.best || r.time < rec.best) rec.best = r.time;
             S.raceRecords[r.name] = rec;
+            S.raceResult = { name: r.name, win: true };
             S.race = null;
             saveGame();
           }
         }
+        if (S.race) stepRival(dt);
       }
       if (S.coast) {
         const r = S.coast;
@@ -1041,6 +1056,84 @@ const SLS = (() => {
           }
         }
       }
+    }
+
+    // ---------- race rival ----------
+    // The rival runs the same gates on the traffic lane model (axis / road /
+    // along / dir). At each crossing it probes 30 units past every exit and
+    // takes the one that leaves it closest to its gate; straight wins ties.
+    // No randomness anywhere: same start, same race, every time.
+    function placeRival(r) {
+      if (r.axis === 'NS') { r.x = D.ROADS[r.road] + (r.dir > 0 ? 3.4 : -3.4); r.z = r.along; r.ang = r.dir > 0 ? 0 : Math.PI; }
+      else { r.z = D.ROADS[r.road] + (r.dir > 0 ? -3.4 : 3.4); r.x = r.along; r.ang = r.dir > 0 ? Math.PI / 2 : -Math.PI / 2; }
+    }
+    function spawnRival(race) {
+      const start = race.start, gate = race.gates[0];
+      const snapIdx = (v) => D.ROADS.reduce((bi, c, i) => Math.abs(c - v) < Math.abs(D.ROADS[bi] - v) ? i : bi, 0);
+      let axis, road;
+      if (Math.abs(start.x - D.ROADS[snapIdx(start.x)]) <= Math.abs(start.z - D.ROADS[snapIdx(start.z)])) { axis = 'NS'; road = snapIdx(start.x); }
+      else { axis = 'EW'; road = snapIdx(start.z); }
+      const along = axis === 'NS' ? start.z : start.x;
+      const gateAlong = axis === 'NS' ? gate.z : gate.x;
+      const r = { axis, road, dir: gateAlong >= along ? 1 : -1, along, speed: 0, next: 0, done: false, x: start.x, z: start.z, ang: 0, lastCross: '' };
+      placeRival(r);
+      return r;
+    }
+    function stepRival(dt) {
+      const race = S.race;
+      const r = race && race.rival;
+      if (!r || r.done) return;
+      const gate = race.gates[r.next];
+      if (!gate) { r.done = true; return; }
+      let turning = false;
+      const crossIdx = Math.round((r.along + 192) / 64);
+      if (crossIdx >= 0 && crossIdx <= 6 && Math.abs(r.along - D.ROADS[crossIdx]) < 1.4 && r.speed > 2) {
+        const key = r.axis + ':' + r.road + ':' + crossIdx;
+        if (r.lastCross !== key) {
+          r.lastCross = key;
+          const crossCoord = D.ROADS[crossIdx];
+          const cxp = r.axis === 'NS' ? D.ROADS[r.road] : crossCoord;
+          const czp = r.axis === 'NS' ? crossCoord : D.ROADS[r.road];
+          const probe = (axis, dir) => axis === 'NS' ? { x: cxp, z: czp + dir * 30 } : { x: cxp + dir * 30, z: czp };
+          const dOf = (pt) => (pt.x - gate.x) ** 2 + (pt.z - gate.z) ** 2;
+          let bestOpt = null, bestD = dOf(probe(r.axis, r.dir));
+          for (const nd of [1, -1]) {
+            const na = r.axis === 'NS' ? 'EW' : 'NS';
+            const dd = dOf(probe(na, nd));
+            if (dd < bestD - 1) { bestD = dd; bestOpt = { axis: na, dir: nd }; }
+          }
+          if (bestOpt) {
+            turning = true;
+            r.axis = bestOpt.axis; r.dir = bestOpt.dir;
+            r.road = crossIdx;
+            r.along = bestOpt.axis === 'NS' ? czp : cxp;
+          }
+        }
+      }
+      let target = 16.5; // cruise: under a clean sport run, over a sloppy one
+      if (turning) target = 8;
+      const p = S.player;
+      if (p.carId >= 0) { // the rival queues behind your car like any driver
+        const ahead = r.axis === 'NS' ? (p.z - r.z) * r.dir : (p.x - r.x) * r.dir;
+        const lateral = r.axis === 'NS' ? Math.abs(p.x - r.x) : Math.abs(p.z - r.z);
+        if (ahead > 0 && ahead < 9 && lateral < 2.4) target = Math.min(target, Math.max(0, (ahead - 5)) * 1.5);
+      }
+      r.speed += clamp(target - r.speed, -22 * dt, 9 * dt);
+      if (r.speed < 0.05 && target === 0) r.speed = 0;
+      r.along += r.dir * r.speed * dt;
+      if (Math.abs(r.along) > 205) r.along = -r.along * 0.98;
+      placeRival(r);
+      if ((gate.x - r.x) ** 2 + (gate.z - r.z) ** 2 < 144) {
+        r.next++;
+        if (r.next >= race.gates.length) { r.done = true; rivalWins(); }
+      }
+    }
+    function rivalWins() {
+      const r = S.race;
+      if (!r) return;
+      S.raceResult = { name: r.name, win: false };
+      toast(`Outrun — the crimson rival took the ${r.name}. No prize.`);
+      S.race = null;
     }
 
     // ---------- emergency services ----------
@@ -1166,7 +1259,7 @@ const SLS = (() => {
       }
       // races / coast
       if (p.carId >= 0 && !S.race && !S.coast && story.active === null && S.taxi.phase !== 'fare') {
-        for (const r of D.RACES) if (dist(p, r.start) < 10) return { label: `Start race: ${r.name} (par ${D.racePar([r.start, ...r.gates]).toFixed(0)}s)`, act: 'race:' + r.name };
+        for (const r of D.RACES) if (dist(p, r.start) < 10) return { label: `Start race: ${r.name} — beat the crimson rival (par ${D.racePar([r.start, ...r.gates]).toFixed(0)}s)`, act: 'race:' + r.name };
         if (dist(p, D.SITES.trial) < 10) return { label: 'Start the Coast Run time trial (+$350)', act: 'coast' };
       }
       // garage repair
@@ -1277,8 +1370,10 @@ const SLS = (() => {
       } else if (act.startsWith('race:')) {
         const name = act.slice(5);
         const r = D.RACES.find(q => q.name === name);
-        S.race = { name, gates: r.gates, next: 0, time: 0, par: D.racePar([r.start, ...r.gates]) };
-        toast(`${name} — hit every gate. Par ${S.race.par.toFixed(0)}s.`);
+        S.race = { name, gates: r.gates, start: r.start, next: 0, time: 0, par: D.racePar([r.start, ...r.gates]) };
+        S.race.rival = spawnRival(S.race);
+        S.raceResult = null;
+        toast(`${name} — beat the crimson rival to every gate. Par ${S.race.par.toFixed(0)}s.`);
       } else if (act === 'coast') {
         S.coast = { next: 0, time: 0 };
         toast('Coast Run — nine gates around the island. +$350 at the finish.');

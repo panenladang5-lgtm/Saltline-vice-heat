@@ -284,5 +284,68 @@ function run(sim, seconds, input) { const n = Math.round(seconds * 60); for (let
   eq(S2.blocksSet, 0, 'police: no roadblocks below four stars');
 }
 
+// ---- street races: the crimson rival ----
+{
+  // starting a race spawns the rival on the grid at gate zero
+  const sim = mkSim(); const S = sim.S;
+  const car = S.cars[0];
+  car.x = D.RACES[0].start.x; car.z = D.RACES[0].start.z;
+  S.player.carId = 0; S.player.mode = 'car';
+  S.player.x = car.x; S.player.z = car.z;
+  sim.step(1 / 60, IN({ interactPressed: true }));
+  ok(S.race && S.race.rival, 'starting a race spawns the rival');
+  eq(S.race.rival.next, 0, 'rival begins at gate zero');
+  ok(Number.isFinite(S.race.rival.x) && Number.isFinite(S.race.rival.z), 'rival holds a finite grid position');
+  // leave the player parked: the rival still runs the whole route and wins
+  run(sim, 60, IN());
+  eq(S.race, null, 'a rival win ends the race');
+  ok(S.raceResult && S.raceResult.win === false && S.raceResult.name === 'Avenida Sprint', 'parked player loses the Avenida Sprint to the rival');
+}
+{
+  // crossing every gate before the rival pays the winner's purse
+  const sim = mkSim(); const S = sim.S;
+  const car = S.cars[1];
+  car.x = D.RACES[0].start.x; car.z = D.RACES[0].start.z;
+  S.player.carId = 1; S.player.mode = 'car';
+  S.player.x = car.x; S.player.z = car.z;
+  sim.step(1 / 60, IN({ interactPressed: true }));
+  ok(S.race, 'race running for the player-win run');
+  const before = S.player.money;
+  for (const g of D.RACES[0].gates) {
+    car.x = g.x; car.z = g.z; car.speed = 0;
+    sim.step(1 / 60, IN());
+  }
+  eq(S.race, null, 'crossing the last gate first ends the race');
+  ok(S.raceResult && S.raceResult.win === true, 'player win is recorded');
+  eq(S.player.money, before + 150, 'first win over the rival pays $150');
+  eq((S.raceRecords['Avenida Sprint'] || {}).wins, 1, 'the win lands in the race records');
+}
+{
+  // the rival's line is deterministic and it takes Port Run gates too
+  const simA = mkSim(), simB = mkSim();
+  for (const sim of [simA, simB]) {
+    const S = sim.S;
+    S.cars[0].x = D.RACES[1].start.x; S.cars[0].z = D.RACES[1].start.z;
+    S.player.carId = 0; S.player.mode = 'car';
+    S.player.x = S.cars[0].x; S.player.z = S.cars[0].z;
+    sim.step(1 / 60, IN({ interactPressed: true }));
+  }
+  for (let i = 0; i < 600; i++) { simA.step(1 / 60, IN()); simB.step(1 / 60, IN()); }
+  const A = simA.S, B = simB.S;
+  ok(A.race && B.race, 'Port Run still running in both sims');
+  eq(A.race.rival.x, B.race.rival.x, 'rival line is deterministic (x)');
+  eq(A.race.rival.z, B.race.rival.z, 'rival line is deterministic (z)');
+  ok(A.race.rival.next >= 1, 'rival has taken at least one Port Run gate');
+}
+
+// ---- fleet variety ----
+{
+  const types = new Set(mkSim().S.cars.map(c => c.type));
+  ok(types.has('pickup'), 'the fleet includes pickups');
+  ok(types.has('compact'), 'the fleet includes compact hatchbacks');
+  ok(D.VEHICLE_STATS.pickup.top > 0 && D.VEHICLE_STATS.compact.top > 0, 'new types carry driving stats');
+  ok(D.CHOP_PAY.pickup > 0 && D.CHOP_PAY.compact > 0, 'the chop shop prices the new types');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

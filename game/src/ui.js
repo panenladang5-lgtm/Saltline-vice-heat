@@ -491,6 +491,8 @@ Story: take contracts from Mara at the dispatch office (pink M). Finish all six 
         ctx.fillRect(-s / 2, -s / 2, s, s);
         ctx.restore();
       }
+      // race rival: a magenta ring, so the duel reads on the map
+      if (S.race && S.race.rival) ringDot(S.race.rival.x, S.race.rival.z, '#ff2e88', big ? 5 : 3.4);
       // police
       const flash = Math.floor(performance.now() / 300) % 2 === 0;
       for (const u of S.policeCars) if (u.active) dot(u.x, u.z, flash ? '#ff5040' : '#4080ff', big ? 4 : 2.5);

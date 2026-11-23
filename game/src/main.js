@@ -29,6 +29,7 @@
 
   // ---------------- actor binding ----------------
   const carRefs = new Map();
+  let rivalRefs = null;
   const smokeMeshes = new Map();
   let pedField = null, playerFig = null;
   const policeCarRefs = [], policeFootFigs = [], blockRefs = [];
@@ -149,6 +150,14 @@
     fareFig = seatFigure({ shirt: 0xead94f, pants: 0x404a5a });
     fareFig.group.visible = false;
     scene.add(fareFig.group);
+    // the race rival: a crimson sport coupe with its own driver, on stage
+    // only while a street race is running
+    rivalRefs = SLA.makeCarMesh('sport', 0xd92b3a, {});
+    rivalRefs.group.visible = false;
+    const rfig = seatFigure({ shirt: 0x8e1f2f, pants: 0x2a2e38 });
+    rfig.group.position.set(-0.38, 0.52, 0.05);
+    rivalRefs.group.add(rfig.group);
+    scene.add(rivalRefs.group);
     // roadblock units (parked police cars, bound to the sim's block pool)
     for (let i = 0; i < st.blockCars.length; i++) {
       const refs = SLA.makeCarMesh('sedan', 0xf2f4f6, { police: true });
@@ -353,7 +362,7 @@
       const dest = D.TAXI_SPOTS[S.taxi.dest];
       html += `<br>Fare → <b>${D.districtAt(dest.x, dest.z)}</b> · ${fmtT(Math.max(0, S.taxi.timeLeft))} left`;
     } else if (S.taxi.passengerOut) html += '<br>A passenger is waiting at a taxi spot.';
-    if (S.race) html += `<br>${S.race.name}: gate ${S.race.next + 1}/${S.race.gates.length} · ${S.race.time.toFixed(1)}s / par ${S.race.par.toFixed(0)}s`;
+    if (S.race) html += `<br>${S.race.name}: gate ${S.race.next + 1}/${S.race.gates.length} · rival gate ${S.race.rival ? S.race.rival.next : 0}/${S.race.gates.length} · ${S.race.time.toFixed(1)}s / par ${S.race.par.toFixed(0)}s`;
     if (S.coast) html += `<br>Coast Run: gate ${S.coast.next + 1}/${D.COAST_RUN.gates.length} · ${S.coast.time.toFixed(1)}s`;
     if (S.robHold) html += `<br>Emptying the register… ${Math.round(S.robHold.t / 4 * 100)}%`;
     return html;
@@ -466,6 +475,17 @@
       f.fig.group.rotation.y = f.ang;
       f.fig.pose(S.t * 11, 'run');
       if (f.t > 6) { f.active = false; f.fig.group.visible = false; }
+    }
+    // race rival coupe
+    if (rivalRefs) {
+      const rv = S.race && S.race.rival;
+      rivalRefs.group.visible = !!rv;
+      if (rv) {
+        rivalRefs.group.position.set(rv.x, 0, rv.z);
+        rivalRefs.group.rotation.y = rv.ang;
+        if (rivalRefs.wheels) for (const w of rivalRefs.wheels) w.rotation.x += rv.speed * dt * 1.9;
+        if (rivalRefs.lights && rivalRefs.lights.userData.setLevel) rivalRefs.lights.userData.setLevel(lightLevel / 2);
+      }
     }
     // police
     S.policeCars.forEach((u, i) => {
