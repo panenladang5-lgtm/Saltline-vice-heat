@@ -892,12 +892,33 @@
   }
   function stageBoatRun() {
     const p = S.player;
+    const neutral = { moveX: 0, moveZ: 0, sprint: false, fire: false, handbrake: false, enterPressed: false, interactPressed: false, reloadPressed: false, weaponPressed: false, jumpPressed: false, interactHeld: false };
+    // mid-contract-3, honestly staged: accept the contract, the guards
+    // are down, the drive is collected — this is the boat leg being
+    // played, one sea gate already cleared, the second ahead
+    S.story.done = 2;
+    p.mode = 'foot'; p.carId = -1; p.x = D.SITES.mara.x; p.z = D.SITES.mara.z;
+    sim.step(1 / 60, { ...neutral, interactPressed: true });
+    S.guards.forEach(g => { g.down = true; g.hp = 0; });
+    for (let i = 0; i < 3; i++) sim.step(1 / 60, neutral);
+    p.x = 141; p.z = 177;
+    for (let i = 0; i < 3; i++) sim.step(1 / 60, neutral);
+    S.events.length = 0; // the accept dialogue is not part of this frame
     const boat = boatStates[0];
-    // offshore and angled toward the pier, so the frame is water, beach
-    // and skyline — not the pier deck filling the foreground
-    boat.x = 256; boat.z = 66; boat.ang = -Math.PI / 2 + 0.3; boat.speed = 9;
+    boat.x = 258; boat.z = 66; boat.ang = 2.36; boat.speed = 9;
+    S.storyGate = 1;
     p.mode = 'boat'; p.boatId = 0; p.x = boat.x; p.z = boat.z; p.ang = boat.ang; p.speedNow = 9;
     ui.camYaw = boat.ang; ui.camDist = 9;
+  }
+  function stageDialogue() {
+    const p = S.player;
+    // the round's headline: the story UI alive — Mara's contract card
+    // open over the dispatch office at golden hour
+    p.mode = 'foot'; p.carId = -1;
+    p.x = D.SITES.mara.x + 3.5; p.z = D.SITES.mara.z + 6.5;
+    p.ang = Math.atan2(D.SITES.mara.x - p.x, D.SITES.mara.z - p.z);
+    ui.showDialogue(D.CONTRACTS[0].start, '01 / A favor in the sun — $450', () => {});
+    ui.camYaw = p.ang - 0.55; ui.camDist = 8.5;
   }
   function applyShot(name) {
     const p = S.player;
@@ -911,6 +932,8 @@
       S.hours = 18.9;
     } else if (name === 'boat') {
       S.hours = 17.9;
+    } else if (name === 'dialogue') {
+      S.hours = 17.35;
     }
     const neutral = { moveX: 0, moveZ: 0, sprint: false, fire: false, handbrake: false, enterPressed: false, interactPressed: false, reloadPressed: false, weaponPressed: false, jumpPressed: false, interactHeld: false };
     for (let i = 0; i < 170; i++) sim.step(1 / 60, neutral);
@@ -918,6 +941,7 @@
     if (name === 'heliport') stageHeliPort();
     if (name === 'palm') stagePalmDusk();
     if (name === 'boat') stageBoatRun();
+    if (name === 'dialogue') stageDialogue();
     S.starsCache = sim.stars();
     const objective = computeObjective();
     processEvents();
