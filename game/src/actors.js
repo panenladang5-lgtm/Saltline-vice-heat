@@ -433,6 +433,21 @@ const SLA = (() => {
     return { group: g, wake, wakeMat };
   }
 
+  // ---------- swimmer: head, cap and back at the surface, arms paddling ----------
+  function makeSwimmer(colorHex) {
+    const g = new THREE.Group();
+    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.13, 0), lam(0xc68c66));
+    head.position.y = 0.12; head.castShadow = true; g.add(head);
+    g.add(box(0.21, 0.08, 0.22, colorHex, 0, 0.21, 0));
+    g.add(box(0.34, 0.1, 0.52, colorHex, 0, 0.03, -0.12));
+    const armGeo = new THREE.CylinderGeometry(0.045, 0.04, 0.52, 5); armGeo.translate(0, -0.26, 0);
+    const armL = new THREE.Mesh(armGeo.clone(), lam(0xc68c66));
+    armL.position.set(-0.23, 0.09, 0.06); armL.castShadow = true; g.add(armL);
+    const armR = new THREE.Mesh(armGeo, lam(0xc68c66));
+    armR.position.set(0.23, 0.09, 0.06); armR.castShadow = true; g.add(armR);
+    return { group: g, armL, armR };
+  }
+
   // ---------- dusk shell ----------
   function makeShellMesh() {
     const g = new THREE.Group();
@@ -443,5 +458,5 @@ const SLA = (() => {
     return g;
   }
 
-  return { PedField, makeFigure, makeSittingFigure, makeCarMesh, makeBikeMesh, makeTowMesh, makeAmbulanceMesh, makeHeliMesh, makeBoatMesh, makeShellMesh, blob };
+  return { PedField, makeFigure, makeSittingFigure, makeCarMesh, makeBikeMesh, makeTowMesh, makeAmbulanceMesh, makeHeliMesh, makeBoatMesh, makeShellMesh, makeSwimmer, blob };
 })();
