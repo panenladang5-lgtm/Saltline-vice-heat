@@ -28,7 +28,8 @@ const SLS = (() => {
       standing: {}, story, shellsGot: new Set(),
       cars: [], peds: [], guards: [], beachFolk: [],
       policeCars: [], policeFoot: [], helis: [],
-      taxi: { phase: 'wait', spot: 0, seq: 0, dest: -1, fare: 0, timeLeft: 0, routeLen: 0, nextIn: 0 },
+      taxi: { phase: 'wait', spot: 0, seq: 0, dest: -1, fare: 0, timeLeft: 0, routeLen: 0, nextIn: 0, carId: -1 },
+      blockCars: [], blockCd: 0, blocksSet: 0, lightPhase: 0,
       race: null, coast: null,
       robbery: D.ROBBERY_SHOPS.map(() => ({ count: 0, cd: 0 })),
       robHold: null, channel: null,
@@ -104,6 +105,8 @@ const SLS = (() => {
       }
       // police pools
       for (let i = 0; i < 6; i++) S.policeCars.push({ active: false, x: 0, z: 0, ang: 0, speed: 0, hp: 140, hasDriver: true, mesh: null, driverFig: null, retireT: 0 });
+      // roadblock pool: parked units that seal a road ahead of the player
+      for (let i = 0; i < 2; i++) S.blockCars.push({ active: false, x: 0, z: 0, ang: 0, hp: 200, setT: -99 });
       for (let i = 0; i < 6; i++) S.policeFoot.push({ active: false, x: 0, z: 0, ang: 0, hp: 100, fireCd: 0, fig: null, fromCar: -1 });
       // tow trucks + ambulances
       for (let i = 0; i < 3; i++) S.services.tows.push({ state: 'idle', x: D.SITES.depot.x, z: D.SITES.depot.z, ang: 0, speed: 0, job: null, phaseT: 0, mesh: null });
@@ -198,7 +201,7 @@ const SLS = (() => {
       stepHelis(dt);
       stepGuards(dt);
       stepMissions(dt);
-      stepActivities(dt);
+      stepActivities(dt, input);
       stepServices(dt);
       stepBeach(dt);
       // ----- wanted decay -----
@@ -309,6 +312,24 @@ const SLS = (() => {
             if (S.wanted.episode || Math.abs(car.speed) > 12) crime('collision');
             emit({ k: 'sfx', name: 'bump' });
           }
+        }
+      }
+      // roadblock units are solid: ramming one costs speed and hull, and a
+      // fast enough hit shoves the unit aside and breaks the block
+      for (const u of S.blockCars) {
+        if (!u.active) continue;
+        const d2 = (u.x - car.x) ** 2 + (u.z - car.z) ** 2;
+        if (d2 < 10.2 && Math.abs(car.speed) > 3) {
+          const d = Math.sqrt(d2) || 0.1;
+          const push = (3.2 - d);
+          car.x -= (u.x - car.x) / d * push * 0.6;
+          car.z -= (u.z - car.z) / d * push * 0.6;
+          u.hp -= Math.abs(car.speed) * 2.2;
+          damageCar(car, 5, true);
+          car.speed = -car.speed * 0.3;
+          S.stats.crashes++;
+          emit({ k: 'sfx', name: 'crash' });
+          if (u.hp <= 0) { u.active = false; S.blockCd = Math.max(S.blockCd, 8); toast('You smashed through the roadblock!'); }
         }
       }
       // ped casualties by car
@@ -490,6 +511,7 @@ const SLS = (() => {
     function stepTraffic(dt) {
       const p = S.player;
       const lightPhase = Math.floor(S.t / 9) % 2; // 0: NS green, 1: EW green
+      S.lightPhase = lightPhase;
       const night = S.phase === 'night';
       for (const car of S.cars) {
         if (car.gone || car.towed || car.parked || !car.driver) continue;
@@ -509,14 +531,17 @@ const SLS = (() => {
         const distToCross = (car.dir > 0 ? (64 - alongMod) : alongMod) - 10;
         const myGreen = (axis === 'NS') === (lightPhase === 0);
         if (!myGreen && distToCross > 0 && distToCross < 7 && !nightPark) target = 0;
-        // spacing: car ahead in same lane
+        // spacing: car ahead in same lane (traffic gives the player's car
+        // a wider berth — it brakes earlier and keeps a bigger gap)
         for (const o of S.cars) {
           if (o === car || o.gone) continue;
           const od = (o.x - px) ** 2 + (o.z - pz) ** 2;
-          if (od < 100) {
+          if (od < 170) {
             const ahead = axis === 'NS' ? (o.z - pz) * car.dir : (o.x - px) * car.dir;
             const lateral = axis === 'NS' ? Math.abs(o.x - px) : Math.abs(o.z - pz);
-            if (ahead > 0 && ahead < 10 && lateral < 2.4) { target = Math.min(target, Math.max(0, (ahead - 6)) * 1.5); car.blockedT += dt; }
+            const isPlayerCar = S.player.carId >= 0 && o.id === S.player.carId;
+            const reach = isPlayerCar ? 13 : 10, gap = isPlayerCar ? 8 : 6;
+            if (ahead > 0 && ahead < reach && lateral < 2.4) { target = Math.min(target, Math.max(0, (ahead - gap)) * 1.5); car.blockedT += dt; }
           }
         }
         // head-on yield: oncoming in adjacent lane close -> slow
@@ -684,6 +709,49 @@ const SLS = (() => {
         }
       }
       S._anyPoliceSeen = S.policeCars.some(u => u.active) || S.policeFoot.some(u => u.active);
+      stepRoadblocks(dt);
+    }
+    // ---------- roadblocks (4-5 stars, player driving) ----------
+    function stepRoadblocks(dt) {
+      const p = S.player;
+      const st = stars();
+      S.blockCd = Math.max(0, S.blockCd - dt);
+      const want = (st >= 4 && p.carId >= 0 && !p.dead) ? Math.min(2, st - 3) : 0;
+      for (const u of S.blockCars) {
+        if (!u.active) continue;
+        const d = dist(u, p);
+        const passed = ((u.x - p.x) * Math.sin(p.ang) + (u.z - p.z) * Math.cos(p.ang)) < -20;
+        if (want === 0 || d > 130 || passed || S.t - u.setT > 40) {
+          u.active = false;
+          S.blockCd = Math.max(S.blockCd, passed ? 3 : 6);
+          continue;
+        }
+        // a set block watches the road: being seen by it holds the search open
+        if (d < 45 && !losBlocked(u.x, u.z, p.x, p.z)) { S.wanted.seen = true; S.wanted.search = 1; }
+      }
+      const activeN = S.blockCars.filter(u => u.active).length;
+      if (activeN < want && S.blockCd <= 0) {
+        const u = S.blockCars.find(u => !u.active);
+        if (u) {
+          const ahead = 52;
+          let tx = p.x + Math.sin(p.ang) * ahead;
+          let tz = p.z + Math.cos(p.ang) * ahead;
+          const snap = (v) => D.ROADS.reduce((q, c) => Math.abs(c - v) < Math.abs(q - v) ? c : q, D.ROADS[0]);
+          const second = activeN > 0;
+          if (Math.abs(Math.cos(p.ang)) >= Math.abs(Math.sin(p.ang))) {
+            // travelling north/south: seal the NS road, car parked across it
+            tx = snap(p.x) + (second ? 3.4 : -1.6);
+            u.ang = Math.PI / 2 + (second ? -0.16 : 0.1);
+          } else {
+            tz = snap(p.z) + (second ? 3.4 : -1.6);
+            u.ang = 0 + (second ? 0.16 : -0.1);
+          }
+          u.x = clamp(tx, -208, 214); u.z = clamp(tz, -208, 208);
+          u.active = true; u.setT = S.t; u.hp = 200;
+          S.blocksSet++;
+          emit({ k: 'policespawn', e: u });
+        }
+      }
     }
     function lookoutCheck(u) {
       if (S.cooldowns.lookout <= 0 && dist(u, S.player) < 55) {
@@ -825,10 +893,10 @@ const SLS = (() => {
 
     // ---------- activities ----------
     function cancelTaxi(msg) {
-      S.taxi.phase = 'wait'; S.taxi.nextIn = 20 + Math.random() * 25;
+      S.taxi.phase = 'wait'; S.taxi.nextIn = 20 + Math.random() * 25; S.taxi.carId = -1;
       if (msg) toast(msg);
     }
-    function stepActivities(dt) {
+    function stepActivities(dt, input) {
       const p = S.player;
       const tx = S.taxi;
       if (tx.phase === 'wait') {
@@ -844,6 +912,7 @@ const SLS = (() => {
             tx.timeTotal = D.taxiTimeLimit(tx.routeLen);
             tx.timeLeft = tx.timeTotal;
             tx.phase = 'fare';
+            tx.carId = p.carId;
             tx.passengerOut = false;
             toast(`Fare aboard — bound for ${D.districtAt(dest.x, dest.z)}, $${Math.round(tx.fare)} on the meter.`);
             emit({ k: 'sfx', name: 'pickup' });
@@ -860,7 +929,7 @@ const SLS = (() => {
           S.standing[dn] = Math.min(100, S.standing[dn] + 2);
           toast(`Fare paid $${Math.round(tx.fare)} + $${bonus} time bonus.`);
           emit({ k: 'sfx', name: 'cash' });
-          tx.phase = 'wait'; tx.seq++; tx.spot = (tx.spot + 1) % D.TAXI_SPOTS.length;
+          tx.phase = 'wait'; tx.carId = -1; tx.seq++; tx.spot = (tx.spot + 1) % D.TAXI_SPOTS.length;
           tx.passengerOut = false; tx.nextIn = 20 + Math.random() * 25;
         } else if (tx.timeLeft <= 0) cancelTaxi('Fare timed out — no payment.');
       }
@@ -880,10 +949,11 @@ const SLS = (() => {
           }
         });
       }
-      // robbery hold
+      // robbery: a true hold-E channel — releasing the key breaks it
       if (S.robHold) {
         const sh = D.ROBBERY_SHOPS[S.robHold.shop];
         if (p.mode !== 'foot' || dist(p, sh) > 5 || p.dead) { S.robHold = null; toast('Robbery interrupted.'); }
+        else if (!input || !input.interactHeld) { S.robHold = null; toast('Robbery interrupted — keep E held to the end.'); }
         else {
           S.robHold.t += dt;
           if (S.robHold.t >= 4) {
@@ -1078,7 +1148,7 @@ const SLS = (() => {
       for (let i = 0; i < D.ROBBERY_SHOPS.length; i++) {
         if (dist(p, D.ROBBERY_SHOPS[i]) < 5 && p.mode === 'foot') {
           if (S.robbery[i].cd > 0) return { label: `This shop is lying low (${Math.ceil(S.robbery[i].cd)}s)`, act: null };
-          return { label: 'Hold E nearby to rob the register (4s)', act: 'rob:' + i };
+          return { label: 'Hold E to rob the register (4s)', act: 'rob:' + i };
         }
       }
       // chop shop
@@ -1317,3 +1387,4 @@ const SLS = (() => {
 
   return { createSim };
 })();
+if (typeof module !== 'undefined' && module.exports) module.exports = SLS;
