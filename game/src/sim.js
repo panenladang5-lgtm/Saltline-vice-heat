@@ -34,6 +34,7 @@ const SLS = (() => {
       robbery: D.ROBBERY_SHOPS.map(() => ({ count: 0, cd: 0 })),
       robHold: null, channel: null,
       cooldowns: { quickFix: 0, cleanPlate: 0, lookout: 0 },
+      sessionLive: false, // set by beginSession() once play actually starts
       services: { tows: [], ambulances: [], jobs: [] },
       stats: { distance: 0, contracts: 0, earned: 0, crashes: 0, shots: 0, races: 0, kills: 0 },
       settings: { volume: 0.55, music: true },
@@ -209,6 +210,7 @@ const SLS = (() => {
       p.hp -= through + absorbed * 0; // armour fully absorbs its share
       p.hp -= 0;
       if (p.hp <= 0) { p.hp = 0; p.dead = true; p.deadT = S.t; emit({ k: 'death' }); if (story.active !== null) { story.fail(); toast('Contract failed — it restarts at Mara.'); } }
+      else if (through > 0) emit({ k: 'hitflash' }); // damage you can feel: taking a hit flashes the screen (death has its own)
     }
     function healFull() { S.player.hp = 100; }
 
@@ -615,7 +617,7 @@ const SLS = (() => {
       }
     }
 
-    return { S, buildEntities, step, stars, currentCar, hurtPlayer, healFull, emit, toast, saveGame, loadGame, applySave, rescue, respawn, buyClinic, interactInfo, tryInteract, setBoats };
+    return { S, buildEntities, step, stars, currentCar, hurtPlayer, healFull, emit, toast, saveGame, loadGame, applySave, rescue, respawn, buyClinic, interactInfo, tryInteract, setBoats, beginSession };
     // hoisted function declarations below are part of the closure
 
     // ---------- traffic ----------
@@ -628,20 +630,27 @@ const SLS = (() => {
         if (car.gone || car.towed || car.parked || !car.driver) continue;
         if (S.player.carId === car.id) continue;
         const isBike = car.type === 'bike';
-        // night parking slice: fixed ids park up
+        // night parking slice: fixed ids park up — at the curb (the lane
+        // offset eases from 3.4 to 6.8), and never inside an intersection
+        // cell: a car that reaches a crossing keeps rolling until clear
         const nightPark = night && (car.id % 10) < 3;
+        const alongModP = ((car.along % 64) + 64) % 64;
+        const inCrossing = alongModP < 10 || alongModP > 54;
+        const parking = nightPark && !inCrossing;
+        car._curb = clamp((car._curb || 0) + (parking ? dt * 0.7 : -dt * 2.5), 0, 1);
         const cruise = D.VEHICLE_STATS[car.type].top * 0.55 * (night ? 0.9 : 1);
-        let target = nightPark ? 0 : Math.min(car.speed + 8 * dt, cruise * (0.5 + (car.id % 5) * 0.1));
+        let target = parking ? 0 : Math.min(car.speed + 8 * dt, cruise * (0.5 + (car.id % 5) * 0.1));
         // grid following
         const axis = car.axis, roadCoord = D.ROADS[car.road];
+        const laneOff = 3.4 + 3.4 * car._curb;
         let px, pz, heading;
-        if (axis === 'NS') { px = roadCoord + (car.dir > 0 ? 3.4 : -3.4); pz = car.along; heading = car.dir > 0 ? 0 : Math.PI; }
-        else { pz = roadCoord + (car.dir > 0 ? -3.4 : 3.4); px = car.along; heading = car.dir > 0 ? Math.PI / 2 : -Math.PI / 2; }
+        if (axis === 'NS') { px = roadCoord + (car.dir > 0 ? laneOff : -laneOff); pz = car.along; heading = car.dir > 0 ? 0 : Math.PI; }
+        else { pz = roadCoord + (car.dir > 0 ? -laneOff : laneOff); px = car.along; heading = car.dir > 0 ? Math.PI / 2 : -Math.PI / 2; }
         // stop line at intersections on red
         const alongMod = ((car.along % 64) + 64) % 64;
         const distToCross = (car.dir > 0 ? (64 - alongMod) : alongMod) - 10;
         const myGreen = (axis === 'NS') === (lightPhase === 0);
-        if (!myGreen && distToCross > 0 && distToCross < 7 && !nightPark) target = 0;
+        if (!myGreen && distToCross > 0 && distToCross < 7 && !parking) target = 0;
         // spacing: car ahead in same lane (traffic gives the player's car
         // a wider berth — it brakes earlier and keeps a bigger gap)
         for (const o of S.cars) {
@@ -929,7 +938,11 @@ const SLS = (() => {
         const targetY = Math.max(31 + Math.sin(S.t * 0.5 + i * 2) * 2.5, roof + 12);
         h.y += clamp(targetY - h.y, -8 * dt, 8 * dt);
         h.spotOn = follow && (S.hours >= 18.5 || S.hours < 6);
-        if (h.spotOn) { S.wanted.seen = true; }
+        // the beam is a light, not omniscience: it only holds you seen
+        // while it can actually see you — inside ~75 units with a clear
+        // line from the aircraft. Without this, a following heli at night
+        // made wanted mathematically un-clearable until dawn.
+        if (h.spotOn && dist2(h, p) < 75 * 75 && !losBlocked(h.x, h.z, p.x, p.z)) { S.wanted.seen = true; }
       });
     }
 
@@ -949,10 +962,17 @@ const SLS = (() => {
       for (const gf of S.guards) {
         if (gf.down || gf.neutral) continue;
         const d = dist(gf, p);
-        if (d < 42) gf.aggro = true;
+        // aggro needs eyes on you: inside 15 m, or inside 42 m with a
+        // clear line — guards no longer hunt through walls, so the
+        // stealth the contract briefs imply actually exists
+        if (d < 15 || (d < 42 && !losBlocked(gf.x, gf.z, p.x, p.z))) gf.aggro = true;
         if (!gf.aggro) continue;
         gf.ang = Math.atan2(p.x - gf.x, p.z - gf.z);
-        if (d > 20) { gf.x += Math.sin(gf.ang) * 2.6 * dt; gf.z += Math.cos(gf.ang) * 2.6 * dt; gf.swing += dt * 6; }
+        if (d > 20) {
+          gf.x += Math.sin(gf.ang) * 2.6 * dt; gf.z += Math.cos(gf.ang) * 2.6 * dt;
+          const c = collideBuildings(gf.x, gf.z, 0.45); gf.x = c.x; gf.z = c.z; // guards collide like every other mover
+          gf.swing += dt * 6;
+        }
         if (d < 38 && !losBlocked(gf.x, gf.z, p.x, p.z)) {
           gf.fireCd -= dt;
           if (gf.fireCd <= 0) {
@@ -1162,7 +1182,16 @@ const SLS = (() => {
       if (S.race) {
         const r = S.race;
         r.time += dt;
-        const gate = r.gates[r.next];
+        // abandon rule: a race is a car activity — leave the car and it
+        // dies (ten seconds on foot, or on foot and >150 from the next
+        // gate). Without this, parking across the rival's lane and walking
+        // away blocked both race starts for the whole session.
+        if (p.mode === 'foot') {
+          r.footT = (r.footT || 0) + dt;
+          const ng = r.gates[r.next];
+          if (r.footT > 10 || (ng && dist(p, ng) > 150)) { S.race = null; toast('Run abandoned — the rival keeps the purse warm.'); }
+        } else r.footT = 0;
+        const gate = S.race ? r.gates[r.next] : null;
         if (gate && p.carId >= 0 && dist(p, gate) < 12) {
           emit({ k: 'sfx', name: 'gate' });
           r.next++;
@@ -1186,14 +1215,27 @@ const SLS = (() => {
       if (S.coast) {
         const r = S.coast;
         r.time += dt;
-        const gate = D.COAST_RUN.gates[r.next];
+        // abandon rule, same as the races: on foot for ten seconds, or on
+        // foot and nowhere near the next gate. The distance limb is
+        // foot-only on purpose — two Coast Run gates sit 192 units apart,
+        // so a driving player is legitimately far from the next one.
+        if (p.mode === 'foot') {
+          r.footT = (r.footT || 0) + dt;
+          const ng = D.COAST_RUN.gates[r.next];
+          if (r.footT > 10 || (ng && dist(p, ng) > 150)) { S.coast = null; toast('Coast Run abandoned.'); }
+        } else r.footT = 0;
+        const gate = S.coast ? D.COAST_RUN.gates[r.next] : null;
         if (gate && p.carId >= 0 && dist(p, gate) < 12) {
           emit({ k: 'sfx', name: 'gate' });
           r.next++;
           if (r.next >= D.COAST_RUN.gates.length) {
-            p.money += D.COAST_RUN.prize; S.stats.earned += D.COAST_RUN.prize;
-            if (!S.coastBest || r.time < S.coastBest) { S.coastBest = r.time; toast(`Coast Run ${r.time.toFixed(1)}s — new best! +$350.`); }
-            else toast(`Coast Run ${r.time.toFixed(1)}s — +$350.`);
+            // the prize is a record prize, not a lap prize: it pays only
+            // for beating your own best (a first run always counts)
+            if (!S.coastBest || r.time < S.coastBest) {
+              S.coastBest = r.time;
+              p.money += D.COAST_RUN.prize; S.stats.earned += D.COAST_RUN.prize;
+              toast(`Coast Run ${r.time.toFixed(1)}s — new best! +$350.`);
+            } else toast(`Coast Run ${r.time.toFixed(1)}s — your best is ${S.coastBest.toFixed(1)}s. Beat it to take the $350.`);
             S.coast = null;
             saveGame();
           }
@@ -1571,7 +1613,12 @@ const SLS = (() => {
       if (!car) return null;
       return { id: car.id, type: car.type, x: car.x, z: car.z, ang: car.ang, hp: car.hp, color: car.color, mission: car.mission, owned: car.owned, stolen: car.stolen, driving: p.carId === car.id, fuel: car.fuel };
     }
+    function beginSession() { S.sessionLive = true; }
     function saveGame() {
+      // never write before a session has begun: at the title screen the
+      // sim still holds default state, and the old unconditional unload
+      // save overwrote a returning player's real progress with it
+      if (!S.sessionLive) return S.storageOk;
       const p = S.player;
       const snap = D.defaultSave();
       snap.player = { x: p.x, z: p.z, hp: p.hp, armour: p.armour, ammo: p.ammo, clip: p.clip, money: p.money, weapon: p.weapon };

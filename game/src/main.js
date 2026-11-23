@@ -292,9 +292,10 @@
     audioKick: () => { audio.ensure(); if (S.settings.music) audio.radio(true); },
     sfx: (n) => audio.play(n),
     onNewGame: () => {
+      sim.beginSession();
       if (hasSaveAtBoot) { try { localStorage.removeItem(D.SAVE_KEY); } catch { /* ignore */ } location.reload(); }
     },
-    onContinue: () => { if (!sim.loadGame()) ui.toast('Save could not be read — starting fresh.'); },
+    onContinue: () => { sim.beginSession(); if (!sim.loadGame()) ui.toast('Save could not be read — starting fresh.'); },
     onSave: () => sim.saveGame(),
     onBuy: (kind) => sim.buyClinic(kind),
     onRescue: () => sim.rescue(),
@@ -390,6 +391,7 @@
         });
       }
       else if (e.k === 'clinic') ui.openShop(S, D);
+      else if (e.k === 'hitflash') ui.hitFlash();
       else if (e.k === 'death') { ui.flash(); ui.openDeath(S, D); }
       else if (e.k === 'shellhide') { if (shellRefs[e.i]) shellRefs[e.i].group.visible = false; }
       else if (e.k === 'tracer') {
@@ -727,8 +729,16 @@
       processEvents();
       S.starsCache = sim.stars();
       const car = sim.currentCar();
-      audio.engine(driving && !S.player.dead, car ? Math.abs(car.speed) / 30 : 0, Math.abs(inp.moveZ));
+      const boatNow = S.player.mode === 'boat' ? boatStates[S.player.boatId] : null;
+      // boats get an engine voice too, pitched lower than a car's
+      audio.engine((driving || !!boatNow) && !S.player.dead,
+        boatNow ? Math.abs(boatNow.speed) / 16 * 0.55 : (car ? Math.abs(car.speed) / 30 : 0),
+        Math.abs(inp.moveZ));
       audio.siren(S.wanted.episode && S.starsCache > 0 && (S.policeCars.some(u => u.active) || S.policeFoot.some(u => u.active)));
+    } else {
+      // a modal is open: quiet the world instead of freezing its last gain
+      audio.engine(false, 0, 0);
+      audio.siren(false);
     }
     // camera follow: ease behind the car while driving
     if (S.player.mode === 'car' || S.player.mode === 'bike') {

@@ -275,6 +275,10 @@ Story: take contracts from Mara at the dispatch office (pink M). Finish all six 
       setTimeout(() => { completeEl.style.display = 'none'; }, 5000);
     };
     ui.flash = () => { flashEl.style.opacity = '1'; setTimeout(() => { flashEl.style.opacity = '0'; flashEl.style.transition = 'opacity .5s'; }, 60); };
+    ui.hitFlash = () => { // taking damage: a shorter, softer pulse than death's
+      flashEl.style.transition = 'none'; flashEl.style.opacity = '0.45';
+      setTimeout(() => { flashEl.style.opacity = '0'; flashEl.style.transition = 'opacity .45s'; }, 70);
+    };
 
     // ---------- dialogue ----------
     let dlgQueue = [], dlgDone = null;
@@ -413,7 +417,7 @@ Story: take contracts from Mara at the dispatch office (pink M). Finish all six 
         const t = D.tierOf(S.standing[d]);
         const row = el('div', 'standrow', standBox);
         el('span', null, row, d);
-        el('span', null, row, `${t.name} · ${Math.floor(S.standing[d])} · shop discount ${t.discount}%`);
+        el('span', null, row, `${t.name} · ${Math.floor(S.standing[d])} · shop discount ${Math.round(t.discount * 100)}%`);
       }
       openM(bigmap);
     };
