@@ -140,6 +140,26 @@ const SLW = (() => {
     g.add(glass.build(MAT_GLASS()));
     const litWinMat = new THREE.MeshBasicMaterial({ vertexColors: true });
     g.add(litWin.build(litWinMat, false));
+    // a second window layer that only wakes after dark: extra lit windows
+    // (own deterministic stream per building) faded in by the night factor,
+    // so the towers feel inhabited once the PLN layer is on
+    const nightWin = new Batch();
+    for (const b of city.buildings) {
+      const rngN = D.stream(b.seed + 777);
+      const cols = Math.max(2, Math.floor(b.w / 2.3)), rows = Math.max(2, Math.min(16, Math.floor(b.h / 3.1)));
+      for (let k = 0; k < 7; k++) {
+        const f = Math.floor(rngN() * 2);
+        const cx = Math.floor(rngN() * cols), ry = Math.floor(rngN() * rows);
+        const u = (cx + 0.5) / cols - 0.5, v = (ry + 0.5) / rows;
+        const wy = 1.6 + v * (b.h - 2.4);
+        let wx, wz, ryaw = 0;
+        if (f === 0) { wx = b.x + u * b.w; wz = b.z + b.d / 2 + 0.05; }
+        else { wx = b.x - u * b.w; wz = b.z - b.d / 2 - 0.05; ryaw = Math.PI; }
+        nightWin.box(1.15, 1.5, 0.06, twinkle[Math.floor(rngN() * 4)], wx, wy, wz, ryaw);
+      }
+    }
+    const nightWinMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0 });
+    g.add(nightWin.build(nightWinMat, false));
     g.add(basic.build(MAT_BASIC(), false));
 
     // ---- street lamps + PLN decals ----
@@ -175,17 +195,30 @@ const SLW = (() => {
     const fixMat = new THREE.MeshBasicMaterial({ vertexColors: true, color: 0x222222 });
     g.add(fixBatch.build(fixMat, false));
 
-    // ---- traffic lights (decorative, both lamps lit) ----
-    const tlFlat = new Batch(), tlBasic = new Batch();
+    // ---- traffic lights: two lamp sets swapped by the sim's light phase,
+    // so the signals visibly run the same cycle the traffic obeys ----
+    const tlFlat = new Batch(), tlPhaseA = new Batch(), tlPhaseB = new Batch();
     for (const rx of R) for (const rz of R) {
       const x = rx + 9.5, z = rz + 9.5;
       tlFlat.cyl(0.07, 0.07, 4.6, 6, 0x485a72, x, 2.3, z);
       tlFlat.box(0.57, 1.27, 0.45, 0x344355, x, 4.6, z);
-      tlBasic.box(0.29, 0.29, 0.06, 0xf3717b, x, 4.95, z + 0.24);
-      tlBasic.box(0.29, 0.29, 0.06, 0x8ef0ad, x, 4.25, z + 0.24);
+      tlFlat.box(0.45, 1.27, 0.57, 0x344355, x, 4.6, z);
+      // phase A (NS green): green toward the NS approaches, red toward EW
+      tlPhaseA.box(0.29, 0.29, 0.06, 0x8ef0ad, x, 4.95, z + 0.24);
+      tlPhaseA.box(0.29, 0.29, 0.06, 0xf3717b, x, 4.25, z + 0.24);
+      tlPhaseA.box(0.06, 0.29, 0.29, 0xf3717b, x + 0.24, 4.95, z);
+      tlPhaseA.box(0.06, 0.29, 0.29, 0x8ef0ad, x + 0.24, 4.25, z);
+      // phase B: the inverse
+      tlPhaseB.box(0.29, 0.29, 0.06, 0xf3717b, x, 4.95, z + 0.24);
+      tlPhaseB.box(0.29, 0.29, 0.06, 0x8ef0ad, x, 4.25, z + 0.24);
+      tlPhaseB.box(0.06, 0.29, 0.29, 0x8ef0ad, x + 0.24, 4.95, z);
+      tlPhaseB.box(0.06, 0.29, 0.29, 0xf3717b, x + 0.24, 4.25, z);
     }
     g.add(tlFlat.build(MAT_FLAT()));
-    g.add(tlBasic.build(MAT_BASIC(), false));
+    const tlMeshA = tlPhaseA.build(MAT_BASIC(), false);
+    const tlMeshB = tlPhaseB.build(MAT_BASIC(), false);
+    tlMeshB.visible = false;
+    g.add(tlMeshA); g.add(tlMeshB);
 
     // ---- palms ----
     const palmFlat = new Batch();
@@ -222,6 +255,17 @@ const SLW = (() => {
         const len = 2.12 + rng() * 1.26;
         const yaw = (lf / 9) * Math.PI * 2 + rng() * 0.5;
         palmFlat.add(paint(leafGeo(len), leafPal[Math.floor(rng() * 4)]), topX, p.h + 0.1, topZ, yaw, -0.85 - rng() * 0.4, 0);
+      }
+      // a fuller crown: a second, more upright ring of shorter fronds,
+      // plus a coconut cluster tucked under it
+      for (let lf = 0; lf < 6; lf++) {
+        const len = 1.45 + rng() * 0.85;
+        const yaw = (lf / 6) * Math.PI * 2 + rng() * 0.6 + 0.35;
+        palmFlat.add(paint(leafGeo(len), leafPal[Math.floor(rng() * 4)]), topX, p.h + 0.18, topZ, yaw, -0.42 - rng() * 0.3, 0);
+      }
+      for (let cn = 0; cn < 3; cn++) {
+        const ca = rng() * Math.PI * 2;
+        palmFlat.sph(0.11, 0x6b5136, topX + Math.cos(ca) * 0.17, p.h - 0.04, topZ + Math.sin(ca) * 0.17);
       }
     }
     const palmMesh = palmFlat.build(MAT_FLAT());
@@ -380,8 +424,10 @@ const SLW = (() => {
           float foamBand = smoothstep(16.0, 2.0, d) * smoothstep(0.5, 3.0, d);
           float foam = foamBand * (0.5 + 0.5 * sin(vW.x * 0.8 + vW.z * 0.6 + time * 1.7));
           col = mix(col, vec3(0.9, 0.95, 0.95), clamp(foam, 0.0, 1.0) * 0.5);
-          float glit = pow(max(0.0, sin(vW.x * 1.7 + time * 2.0) * sin(vW.z * 1.9 - time * 1.6)), 18.0);
-          col += vec3(1.0, 0.9, 0.7) * glit * 0.35;
+          float glit = pow(max(0.0, sin(vW.x * 1.7 + time * 2.0) * sin(vW.z * 1.9 - time * 1.6)), 12.0);
+          col += vec3(1.0, 0.9, 0.7) * glit * 0.55;
+          float sheen = pow(max(0.0, sin(vW.x * 0.55 - time * 0.9) * sin(vW.z * 0.5 + time * 0.7)), 6.0);
+          col += vec3(1.0, 0.72, 0.45) * sheen * 0.09;
           gl_FragColor = vec4(col, 1.0);
         }`,
     }));
@@ -428,7 +474,10 @@ const SLW = (() => {
       else nightF = 0;
       let horizon = lerpHex(0x333f6b, 0xbfe3da, dayF);
       let top = lerpHex(0x101736, 0x4ba6d6, dayF);
-      if (duskF > 0.03 && dayF > 0.02) horizon.lerp(_c2.setHex(0xf8bd8d), duskF * 0.55);
+      if (duskF > 0.03 && dayF > 0.02) {
+        horizon.lerp(_c2.setHex(0xf8a96a), duskF * 0.72);
+        top.lerp(_c2.setHex(0x8a5570), duskF * 0.22);
+      }
       if (storm > 0.02) { horizon.lerp(_c2.setHex(0x67707c), storm * 0.8); top.lerp(_c2.setHex(0x39424e), storm * 0.8); }
       skyUni.horizonColor.value.copy(horizon);
       skyUni.topColor.value.copy(top);
@@ -449,6 +498,9 @@ const SLW = (() => {
       sun.color.copy(lerpHex(0xff9a52, 0xffd4aa, dayF));
       hemi.intensity = 1.52 * (0.5 + 0.5 * dayF) + lightning * 0.7;
       hemi.color.copy(lerpHex(0x8b9aca, 0xfff2db, dayF));
+      tlMeshA.visible = (env.lightPhase ?? 0) === 0;
+      tlMeshB.visible = !tlMeshA.visible;
+      nightWinMat.opacity = 0.9 * nightF;
       haloMat.opacity = 0.85 * nightF;
       poolMat.opacity = 0.5 * nightF;
       facePoolMat.opacity = 0.5 * nightF;
