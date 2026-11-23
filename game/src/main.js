@@ -320,8 +320,8 @@
     if (st) {
       if (st.kind === 'collect' || st.kind === 'deliver' || st.kind === 'interact' || st.kind === 'combat' || st.kind === 'flee') objPos = { x: st.x, z: st.z };
       else if (st.kind === 'stealcar') { const c = S.cars.find(c => c.id === st.carId); objPos = c ? { x: c.x, z: c.z } : null; }
-      else if (st.kind === 'delivercar') objPos = D.SITES.chop;
-      else if (st.kind === 'rendezvous') objPos = D.SITES.mara;
+      else if (st.kind === 'delivercar') objPos = { x: st.x, z: st.z };
+      else if (st.kind === 'rendezvous') objPos = { x: st.x, z: st.z };
       else if (st.kind === 'boat') {
         if (S.player.mode !== 'boat') {
           let best = null, bd = 1e12;
@@ -349,13 +349,13 @@
         collect: `Pick up: <b>${st.label}</b>${st.veh ? ` — the crate only fits a <b>${st.veh}</b>` : ''}`,
         deliver: `Deliver: <b>${st.label}</b>`,
         stealcar: 'Steal the <b>marked coupe</b>',
-        delivercar: 'Deliver the coupe to the <b>chop shop</b>',
+        delivercar: 'Deliver the coupe to <b>Nico\'s garage</b>',
         combat: `Clear the guards — <b>${down}/${st.count}</b> down`,
         interact: `<b>${st.label}</b>`,
         escape: '<b>Lose the heat</b> — break line of sight',
         boat: `Run the <b>sea gates</b> — finish at the Sunstrand pier`,
         flee: '<b>Reach the safehouse</b> before the lockout',
-        rendezvous: 'Meet <b>Mara</b> — arrive clean, no wanted level',
+        rendezvous: 'Final rendezvous at <b>Sunstrand</b> — arrive clean, no wanted level',
       }[st.kind] || '';
       html = `<b>${c.id}. ${c.title}</b> — $${c.reward}<br>${stepText}`;
       if (S.story.timerStarted && S.story.timer > 0) html += `<br>Lockout in <b>${fmtT(S.story.timer)}</b>`;

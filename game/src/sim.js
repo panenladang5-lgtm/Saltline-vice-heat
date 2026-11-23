@@ -312,8 +312,12 @@ const SLS = (() => {
         mx /= Math.max(1, ml); mz /= Math.max(1, ml);
         const vx = mx * sp, vz = mz * sp;
         let nx = p.x + vx * dt, nz = p.z + vz * dt;
-        // water: on foot may wade east to x=222; elsewhere island bounds
-        nx = clamp(nx, D.BOUNDS.x0, 222); nz = clamp(nz, D.BOUNDS.z0, D.BOUNDS.z1);
+        // water: on foot may wade east to x=222; inside a pier band the
+        // deck (groundY already walks it at y=1.0) carries you out to the
+        // moored boats at x=243 — without this the boat leg of contract 3
+        // could never be boarded and the story ended at the waterline
+        const onPier = D.PIERS.some(pz => Math.abs(nz - pz) < 2.5);
+        nx = clamp(nx, D.BOUNDS.x0, onPier ? 252 : 222); nz = clamp(nz, D.BOUNDS.z0, D.BOUNDS.z1);
         const c = collideBuildings(nx, nz, 0.45);
         p.x = c.x; p.z = c.z;
         p.ang = angLerp(p.ang, Math.atan2(vx, vz), 0.35);
@@ -1023,7 +1027,10 @@ const SLS = (() => {
         }
       } else if (st.kind === 'delivercar') {
         const car = S.cars.find(c => c.id === st.carId);
-        if (car && dist(car, D.SITES.chop) < 9 && Math.abs(car.speed) < 1) {
+        // the step's own coordinates are the destination (Nico's garage,
+        // per the data, the brief and Nico's dialogue) — this used to test
+        // the chop shop, so story-followers parked at Nico forever
+        if (car && dist(car, st) < 9 && Math.abs(car.speed) < 1) {
           car.owned = true; car.mission = false; car.stolen = false;
           if (p.carId === car.id) { p.mode = 'foot'; p.carId = -1; p.x = car.x + 2; p.z = car.z; }
           advanceStory();

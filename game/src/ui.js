@@ -279,7 +279,11 @@ Story: take contracts from Mara at the dispatch office (pink M). Finish all six 
     // ---------- dialogue ----------
     let dlgQueue = [], dlgDone = null;
     ui.showDialogue = (lines, titleText, onDone) => {
-      dlgQueue = lines.slice(); dlgDone = onDone || null;
+      // the sim's data stores dialogue as [who, text] pairs; normalise to
+      // the object shape the card renders (an array read as an object made
+      // every dialogue throw before the modal ever opened)
+      dlgQueue = lines.map(l => Array.isArray(l) ? { who: l[0], text: l[1] } : l);
+      dlgDone = onDone || null;
       dialogue.card.innerHTML = '';
       el('h2', null, dialogue.card, titleText || '—');
       const who = el('div', 'dlg-who', dialogue.card);
@@ -568,3 +572,4 @@ Story: take contracts from Mara at the dispatch office (pink M). Finish all six 
   }
   return { createUI, HELP_TEXT };
 })();
+if (typeof module !== 'undefined' && module.exports) module.exports = SLU;
