@@ -3,6 +3,7 @@
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const D = require('../game/src/data.js');
+const SLS = require('../game/src/sim.js');
 
 let pass = 0, fail = 0;
 function ok(cond, name) { if (cond) { pass++; } else { fail++; console.log('FAIL:', name); } }
@@ -172,6 +173,115 @@ eq(D.priceWithDiscount(100, 'PORT SOL', st), 100, 'no discount at standing 10');
   eq(D.loadSnapshot('not json'), null, 'garbage save refused');
   eq(D.loadSnapshot(null), null, 'missing save refused');
   eq(D.SAVE_KEY, 'saltline-save-v1', 'save key rebranded');
+}
+
+// ---- full-sim headless scenarios (sim.js end to end) ----
+const IN = (over = {}) => ({
+  moveX: 0, moveZ: 0, sprint: false, fire: false, handbrake: false,
+  enterPressed: false, interactPressed: false, reloadPressed: false,
+  weaponPressed: false, jumpPressed: false, interactHeld: false, ...over,
+});
+function mkSim() { const s = SLS.createSim(D); s.buildEntities(() => {}); return s; }
+function run(sim, seconds, input) { const n = Math.round(seconds * 60); for (let i = 0; i < n; i++) sim.step(1 / 60, input); }
+
+// boot + stability: 20 s of neutral input, nothing may go non-finite
+{
+  const sim = mkSim(); const S = sim.S;
+  run(sim, 20, IN());
+  ok(Math.abs(S.t - 20) < 0.01, 'sim clock advances');
+  ok(S.cars.every(c => Number.isFinite(c.x) && Number.isFinite(c.z)), 'car positions finite after 20 s');
+  ok(S.peds.every(pd => Number.isFinite(pd.x) && Number.isFinite(pd.z)), 'ped positions finite after 20 s');
+  ok(S.cars.some(c => c.driver && (c.x !== 0 || c.z !== 0)), 'traffic is moving');
+  eq(S.lightPhase, Math.floor(S.t / 9) % 2, 'light phase published');
+}
+
+// determinism: two fresh sims stepped identically keep the same city + player
+{
+  const a = mkSim(), b = mkSim();
+  for (let i = 0; i < 300; i++) { a.step(1 / 60, IN()); b.step(1 / 60, IN()); }
+  eq(a.S.player.x, b.S.player.x, 'twin sims: player x agrees');
+  eq(a.S.player.z, b.S.player.z, 'twin sims: player z agrees');
+  eq(D.cityFingerprint(D.genCity(D.SEED)), h1, 'city fingerprint unchanged');
+}
+
+// taxi, end to end: pickup at the spot, passenger tracked in the cab, paid at destination
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const car = S.cars[0];
+  const spot = D.TAXI_SPOTS[S.taxi.spot];
+  car.x = spot.x; car.z = spot.z; car.speed = 0; car.parked = false;
+  p.mode = 'car'; p.carId = 0; p.x = car.x; p.z = car.z;
+  run(sim, 0.25, IN());
+  eq(S.taxi.phase, 'fare', 'taxi: fare starts at the spot');
+  eq(S.taxi.carId, 0, 'taxi: the cab is tracked while the fare runs');
+  ok(S.taxi.fare >= 40 && S.taxi.fare <= 90, 'taxi: fare on the meter in range');
+  const dest = D.TAXI_SPOTS[S.taxi.dest];
+  const money0 = p.money;
+  car.x = dest.x; car.z = dest.z; car.speed = 0; p.x = car.x; p.z = car.z;
+  run(sim, 0.25, IN());
+  eq(S.taxi.phase, 'wait', 'taxi: fare completes at the destination');
+  ok(p.money > money0, 'taxi: passenger pays');
+  eq(S.taxi.carId, -1, 'taxi: cab released after the fare');
+}
+
+// robbery: the register only empties while E is physically held for 4 s
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const shop = D.ROBBERY_SHOPS[0];
+  p.x = shop.x; p.z = shop.z; p.mode = 'foot';
+  sim.step(1 / 60, IN({ interactPressed: true, interactHeld: true }));
+  ok(S.robHold !== null, 'robbery: channel starts on the E press');
+  run(sim, 3.5, IN({ interactHeld: true }));
+  eq(S.robbery[0].count, 0, 'robbery: not paid before the 4 s hold completes');
+  run(sim, 1.0, IN({ interactHeld: true }));
+  eq(S.robbery[0].count, 1, 'robbery: pays after a full 4 s hold');
+  ok(S.wanted.ledger >= 3, 'robbery: heat jumps to two stars');
+  // releasing E mid-channel cancels it for good
+  const sim2 = mkSim(); const S2 = sim2.S; const p2 = S2.player;
+  p2.x = shop.x; p2.z = shop.z; p2.mode = 'foot';
+  sim2.step(1 / 60, IN({ interactPressed: true, interactHeld: true }));
+  run(sim2, 2, IN({ interactHeld: true }));
+  ok(S2.robHold !== null, 'robbery: channel alive mid-hold');
+  sim2.step(1 / 60, IN({ interactHeld: false }));
+  eq(S2.robHold, null, 'robbery: releasing E cancels the channel');
+  run(sim2, 3, IN({ interactHeld: false }));
+  eq(S2.robbery[0].count, 0, 'robbery: a cancelled channel never pays');
+}
+
+// traffic: a driver approaching a red light stops at the line
+{
+  const sim = mkSim(); const S = sim.S;
+  let guard = 0;
+  while (S.lightPhase !== 1 && guard++ < 2000) sim.step(1 / 60, IN());
+  eq(S.lightPhase, 1, 'traffic: light phase flips (NS red)');
+  const car = S.cars.find(c => c.driver && c.type === 'sedan');
+  car.axis = 'NS'; car.road = 3; car.dir = 1; car.along = 48; car.speed = 12;
+  car.x = D.ROADS[3] + 3.4; car.z = 48;
+  run(sim, 1.2, IN());
+  ok(car.along < 60, `traffic: car held at the red line (along ${car.along.toFixed(1)} of 64)`);
+  ok(car.speed < 4, 'traffic: car nearly stopped at red');
+}
+
+// police escalation at five stars: cars dispatched, helis follow, a roadblock is set
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const car = S.cars[0];
+  car.x = 0; car.z = 0; car.ang = 0; car.parked = false; car.speed = 8;
+  p.mode = 'car'; p.carId = 0; p.x = 0; p.z = 0; p.ang = 0;
+  S.wanted.ledger = 12; S.wanted.episode = true; S.wanted.search = 1;
+  run(sim, 10, IN({ moveZ: 1 }));
+  eq(sim.stars(), 5, 'police: five stars at ledger 12');
+  ok(S.policeCars.some(u => u.active), 'police: pursuit cars dispatched');
+  ok(S.helis.filter(h => h.mode === 'follow').length >= 2, 'police: helicopters follow at 5 stars');
+  ok(S.blocksSet >= 1, 'police: a roadblock was set ahead of the player');
+  // and at two stars no roadblock ever forms
+  const sim2 = mkSim(); const S2 = sim2.S; const p2 = S2.player;
+  const car2 = S2.cars[0];
+  car2.x = 0; car2.z = 0; car2.parked = false;
+  p2.mode = 'car'; p2.carId = 0; p2.x = 0; p2.z = 0;
+  S2.wanted.ledger = 3; S2.wanted.episode = true; S2.wanted.search = 1;
+  run(sim2, 3, IN());
+  eq(S2.blocksSet, 0, 'police: no roadblocks below four stars');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
