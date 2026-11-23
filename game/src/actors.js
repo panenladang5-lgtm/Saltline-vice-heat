@@ -5,6 +5,22 @@ const SLA = (() => {
   const { Batch, MAT_FLAT, MAT_BASIC, paint } = SLG;
   const lam = (hex) => new THREE.MeshLambertMaterial({ color: hex });
   const bas = (hex) => new THREE.MeshBasicMaterial({ color: hex });
+  // Round 4: human figures read small next to the cars (a sedan roof is
+  // ~1.44 high; a 1.59 figure barely clears it and looks slight). Every
+  // human mesh is built at unit size, then scaled by HUMAN_SCALE so a
+  // standing figure tops out near 1.87 — adult proportion beside a car.
+  const HUMAN_SCALE = 1.18;
+  // Cabin glass is a separate translucent shell so a seated figure shows
+  // through it instead of hiding inside an opaque box.
+  const CABIN_MAT = new THREE.MeshPhongMaterial({ color: 0x39536a, transparent: true, opacity: 0.6, shininess: 50, specular: 0x88aabb });
+  // Seated fit per vehicle type: total figure scale + anchor in car space.
+  // Sized so pelvis sits on the cushion line and head top stays under the
+  // glass/roof line of that body (verified against makeCarMesh geometry).
+  function seatFit(type) {
+    if (type === 'pickup') return { s: 0.60, x: -0.38, y: 0.47, z: 0.92 };
+    if (type === 'van') return { s: 0.62, x: -0.42, y: 0.52, z: 1.05 };
+    return { s: 0.58, x: -0.38, y: 0.44, z: 0.12 }; // sedan / sport / compact / taxi
+  }
   function box(w, h, d, hex, x = 0, y = 0, z = 0) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), lam(hex));
     m.position.set(x, y, z); m.castShadow = true;
@@ -53,7 +69,7 @@ const SLA = (() => {
     // st: {x,z,ang,swing,mode,scale} mode: walk|idle|down|hide
     set(i, st) {
       const d = this._d;
-      const s = st.scale || 1;
+      const s = (st.scale || 1) * HUMAN_SCALE;
       const down = st.mode === 'down', hide = st.mode === 'hide';
       const sw = st.mode === 'walk' ? Math.sin(st.swing) * 0.55 : st.mode === 'run' ? Math.sin(st.swing) * 0.8 : 0;
       const baseY = down ? 0.18 : 0;
@@ -63,7 +79,7 @@ const SLA = (() => {
         d.rotation.set(0, st.ang, 0);
         d.updateMatrix();
         const local = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(tiltX + rx, 0, 0));
-        local.setPosition(ox, oy, oz);
+        local.setPosition(ox * HUMAN_SCALE, oy * HUMAN_SCALE, oz * HUMAN_SCALE);
         const m = new THREE.Matrix4().multiplyMatrices(d.matrix, local);
         if (hide) m.scale(new THREE.Vector3(0, 0, 0)); else m.scale(new THREE.Vector3(s, s, s));
         part.setMatrixAt(i, m);
@@ -129,6 +145,7 @@ const SLA = (() => {
       g.add(weapon);
     }
     g.add(blob(0.45));
+    g.scale.setScalar(o.scale !== undefined ? o.scale : HUMAN_SCALE);
     const fig = {
       group: g, legL, legR, armL, armR, torso, head, weapon,
       pose(swing = 0, mode = 'idle') {
@@ -164,6 +181,16 @@ const SLA = (() => {
     fig.group.children.forEach(c => { if (c.material && c.material.opacity === 0.16) c.visible = false; });
     return fig;
   }
+  // A figure seated inside a car of the given type: scaled and anchored by
+  // seatFit so the whole figure stays inside the cabin silhouette.
+  function makeSeatedFigure(o = {}, type = 'sedan') {
+    const fit = seatFit(type);
+    const fig = makeFigure({ ...o, scale: fit.s });
+    fig.pose(0, 'sit');
+    fig.group.children.forEach(c => { if (c.material && c.material.opacity === 0.16) c.visible = false; });
+    fig.group.position.set(fit.x, fit.y, fit.z);
+    return fig;
+  }
 
   // ---------- cars ----------
   function wheelMesh(r = 0.34, w = 0.24) {
@@ -180,7 +207,10 @@ const SLA = (() => {
     for (const sx of [-spread, spread]) {
       if (spread === 0 && sx !== 0) continue;
       const cone = new THREE.Mesh(new THREE.ConeGeometry(0.55, coneLen, 10, 1, true), coneMat);
-      cone.rotation.x = Math.PI / 2 + 0.045;
+      // ConeGeometry's apex points +Y; rotating -PI/2 puts the apex at the
+      // lamp (frontZ) and the wide base at the far end, dipping slightly
+      // toward the road. (Round 3 had this backwards: fat end at the lamp.)
+      cone.rotation.x = -Math.PI / 2 + 0.025;
       cone.position.set(sx, 0.62, frontZ + coneLen / 2);
       grp.add(cone);
       const pool = new THREE.Mesh(new THREE.CircleGeometry(poolR, 12), poolMat);
@@ -205,9 +235,10 @@ const SLA = (() => {
     b.box(W, bodyH, L, paintHex, 0, baseY, 0); // main shell
     b.box(W * 0.94, bodyH * 0.5, L * 0.2, paintHex, 0, baseY - 0.08, L * 0.46); // nose
     b.box(W * 0.96, bodyH * 0.45, L * 0.16, paintHex, 0, baseY - 0.05, -L * 0.47); // tail
+    let cabinGlass = null; // {w,h,d,x,y,z} — built as a translucent shell below
     if (isPickup) {
       // cab sits over the front third; behind it an open cargo bed
-      b.box(W * 0.84, 0.52, L * 0.3, 0x395368, 0, baseY + bodyH / 2 + 0.26, L * 0.22); // cab glass
+      cabinGlass = { w: W * 0.84, h: 0.52, d: L * 0.3, x: 0, y: baseY + bodyH / 2 + 0.26, z: L * 0.22 };
       b.box(W * 0.8, 0.07, L * 0.27, paintHex, 0, baseY + bodyH / 2 + 0.55, L * 0.22); // cab roof
       b.box(W * 0.92, 0.1, L * 0.46, dark, 0, baseY + 0.16, -L * 0.25); // bed floor
       b.box(W * 0.06, 0.44, L * 0.46, paintHex, -W * 0.44, baseY + 0.33, -L * 0.25); // bed walls
@@ -217,7 +248,7 @@ const SLA = (() => {
     } else if (!isVan) {
       // hatchbacks carry their glasshouse further back than sedans
       const cabLen = isCompact ? L * 0.58 : L * 0.46, cabZ = isCompact ? -L * 0.08 : -L * 0.04;
-      b.box(W * 0.84, 0.48, cabLen, 0x395368, 0, baseY + bodyH / 2 + 0.24, cabZ); // glass cabin
+      cabinGlass = { w: W * 0.84, h: 0.48, d: cabLen, x: 0, y: baseY + bodyH / 2 + 0.24, z: cabZ };
       b.box(W * 0.8, 0.07, cabLen * 0.87, paintHex, 0, baseY + bodyH / 2 + 0.51, cabZ); // roof
     } else {
       b.box(W * 0.92, 0.5, L * 0.2, 0x395368, 0, baseY + bodyH / 2 + 0.22, L * 0.36); // van windshield band
@@ -258,6 +289,11 @@ const SLA = (() => {
     const bodyMat = new THREE.MeshLambertMaterial({ vertexColors: true });
     const bodyMesh = b.build(bodyMat);
     g.add(bodyMesh);
+    if (cabinGlass) {
+      const cg = new THREE.Mesh(new THREE.BoxGeometry(cabinGlass.w, cabinGlass.h, cabinGlass.d), CABIN_MAT);
+      cg.position.set(cabinGlass.x, cabinGlass.y, cabinGlass.z);
+      g.add(cg);
+    }
     g.add(glow.build(MAT_BASIC(), false));
     const wheels = [];
     const wr = isVan ? 0.38 : isCompact ? 0.3 : 0.34;
@@ -303,7 +339,7 @@ const SLA = (() => {
       const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), lam([0xe46c70, 0xf4bb45, 0x3cc8cf, 0xede4cf][colorHex % 4]));
       helmet.position.y = 1.5; helmet.scale.y = 0.85;
       rider.group.add(helmet);
-      rider.group.position.y = 0.55;
+      rider.group.position.y = 0.1; // pelvis lands on the 0.88 seat at HUMAN_SCALE
       g.add(rider.group);
     }
     g.add(blob(1.5));
@@ -323,6 +359,12 @@ const SLA = (() => {
     b.box(0.18, 1.7, 0.18, 0xeeb54e, 0.8, 2.2, 1.1);
     b.box(1.8, 0.16, 0.16, 0xeeb54e, 0, 3.0, 1.1);
     const body = b.build(MAT_FLAT()); g.add(body);
+    const towGlow = new Batch();
+    towGlow.box(0.34, 0.11, 0.05, 0xffefd4, -0.7, 0.85, 3.16);
+    towGlow.box(0.34, 0.11, 0.05, 0xffefd4, 0.7, 0.85, 3.16);
+    g.add(towGlow.build(MAT_BASIC(), false));
+    const lights = headlightRig(7.5, 1.9, 0.7, 3.15); // cab front is z=3.15
+    g.add(lights);
     const beacon = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.3), bas(0xffc24d));
     beacon.position.set(0, 2.1, 2.2); g.add(beacon);
     const wheels = [];
@@ -338,7 +380,7 @@ const SLA = (() => {
     hook.add(hb.build(MAT_FLAT()));
     hook.visible = false; g.add(hook);
     g.add(blob(3.4));
-    return { group: g, wheels, beacon, cable, hook };
+    return { group: g, wheels, beacon, cable, hook, lights };
   }
 
   // ---------- ambulance ----------
@@ -457,6 +499,7 @@ const SLA = (() => {
     armL.position.set(-0.23, 0.09, 0.06); armL.castShadow = true; g.add(armL);
     const armR = new THREE.Mesh(armGeo, lam(0xc68c66));
     armR.position.set(0.23, 0.09, 0.06); armR.castShadow = true; g.add(armR);
+    g.scale.setScalar(HUMAN_SCALE);
     return { group: g, armL, armR };
   }
 
@@ -470,5 +513,5 @@ const SLA = (() => {
     return g;
   }
 
-  return { PedField, makeFigure, makeSittingFigure, makeCarMesh, makeBikeMesh, makeTowMesh, makeAmbulanceMesh, makeHeliMesh, makeBoatMesh, makeShellMesh, makeSwimmer, blob };
+  return { PedField, makeFigure, makeSittingFigure, makeSeatedFigure, seatFit, HUMAN_SCALE, makeCarMesh, makeBikeMesh, makeTowMesh, makeAmbulanceMesh, makeHeliMesh, makeBoatMesh, makeShellMesh, makeSwimmer, blob };
 })();
