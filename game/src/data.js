@@ -151,7 +151,7 @@ const COAST_RUN = {
 };
 const PIERS = [-171, -100, -29, 42, 113, 184];
 const BOATS = [
-  { x: 243, z: 36.5, color: 0xf2efe8 }, { x: 243, z: 48.5, color: 0x3cc8cf }, { x: 243.5, z: 118.5, color: 0xf4bb45 },
+  { x: 243, z: 36.5, ang: Math.PI / 2, color: 0xf2efe8 }, { x: 243, z: 48.5, ang: Math.PI / 2, color: 0x3cc8cf }, { x: 243.5, z: 118.5, ang: Math.PI / 2, color: 0xf4bb45 },
 ];
 const PARKING = {
   pad: { x0: 160, x1: 183, z0: 33, z1: 51 },

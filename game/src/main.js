@@ -17,7 +17,7 @@
 
   const scene = new THREE.Scene();
   scene.fog = new THREE.FogExp2(0xa8c4cf, 0.0011);
-  const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 1200);
+  const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 4000);
 
   const city = D.genCity(D.SEED);
   const world = SLW.buildWorld(D, city);
@@ -57,8 +57,8 @@
     scene.add(playerFig.group);
     for (const car of st.cars) {
       let refs;
-      if (car.type === 'bike') refs = SLA.makeBikeMesh({ color: car.color });
-      else refs = SLA.makeCarMesh({ color: car.color, sport: car.type === 'sport' || car.type === 'coupe', van: car.type === 'van', taxi: car.id === 4 });
+      if (car.type === 'bike') refs = SLA.makeBikeMesh(car.color);
+      else refs = SLA.makeCarMesh(car.type, car.color, {});
       refs.group.position.set(car.x, 0, car.z);
       refs.group.rotation.y = car.ang;
       scene.add(refs.group);
@@ -74,7 +74,7 @@
       }
     }
     for (let i = 0; i < st.policeCars.length; i++) {
-      const refs = SLA.makeCarMesh({ color: 0xf2f4f6, police: true });
+      const refs = SLA.makeCarMesh('sedan', 0xf2f4f6, { police: true });
       refs.group.visible = false;
       const fig = seatFigure({ shirt: 0x2b4d8f, pants: 0x22345c, cap: 0x1d3468 });
       fig.group.position.set(-0.38, 0.52, 0.05);
@@ -91,6 +91,10 @@
     for (let i = 0; i < 3; i++) {
       const refs = SLA.makeHeliMesh();
       scene.add(refs.group);
+      // the beam rig lives in world space, not in the heli's local frame
+      scene.add(refs.spot); scene.add(refs.spot.target);
+      scene.add(refs.cone); scene.add(refs.disc);
+      refs.cone.visible = false; refs.disc.visible = false;
       heliRefs.push(refs);
     }
     for (let i = 0; i < st.services.tows.length; i++) {
@@ -116,7 +120,7 @@
     for (const b of D.BOATS) {
       const stt = { x: b.x, z: b.z, ang: b.ang, speed: 0 };
       boatStates.push(stt);
-      const refs = SLA.makeBoatMesh({ color: b.color });
+      const refs = SLA.makeBoatMesh(b.color);
       refs.group.position.set(b.x, 0, b.z);
       refs.group.rotation.y = b.ang;
       scene.add(refs.group);
@@ -124,10 +128,10 @@
     }
     sim.setBoats(boatStates);
     for (const sh of D.SHELLS) {
-      const refs = SLA.makeShellMesh();
-      refs.group.position.set(sh.x, 0.35, sh.z);
-      scene.add(refs.group);
-      shellRefs.push(refs);
+      const grp = SLA.makeShellMesh();
+      grp.position.set(sh.x, 0, sh.z);
+      scene.add(grp);
+      shellRefs.push({ group: grp });
     }
     // contacts
     const mara = SLA.makeFigure({ shirt: 0xd94f6a, pants: 0x2c3140, hair: 0x241d20 });
@@ -305,7 +309,11 @@
   let lightLevel = -1;
   function syncActors(dt) {
     const p = S.player;
-    pedField.update(S.peds, S.t);
+    S.peds.forEach((pd, i) => pedField.set(i, {
+      x: pd.x, z: pd.z, ang: pd.ang, swing: pd.swing,
+      mode: pd.state === 'down' ? 'down' : pd.state === 'flee' ? 'run' : 'walk',
+    }));
+    pedField.flush();
     // player figure
     if (p.mode === 'car' || p.mode === 'bike') {
       const car = sim.currentCar();
@@ -345,7 +353,7 @@
       refs.group.rotation.y = car.ang;
       if (refs.wheels) for (const w of refs.wheels) w.rotation.x += car.speed * dt * 1.9;
       if (refs.driverFig) refs.driverFig.group.visible = !!car.driver;
-      if (refs.lights) for (const L of refs.lights) L.visible = lightLevel > 0;
+      if (refs.lights && refs.lights.userData.setLevel) refs.lights.userData.setLevel(lightLevel / 2);
       const smoke = smokeMeshes.get(car.id);
       if (car.hp < 35) {
         smoke.visible = true;
@@ -378,9 +386,9 @@
       if (refs.wheels) for (const w of refs.wheels) w.rotation.x += u.speed * dt * 1.9;
       if (refs.lightbar) {
         const phase = Math.floor(S.t * 2.4) % 2 === 0;
-        refs.lightbar[0].visible = phase; refs.lightbar[1].visible = !phase;
+        refs.lightbar.l.visible = phase; refs.lightbar.r.visible = !phase;
       }
-      if (refs.lights) for (const L of refs.lights) L.visible = lightLevel > 0;
+      if (refs.lights && refs.lights.userData.setLevel) refs.lights.userData.setLevel(lightLevel / 2);
     });
     S.policeFoot.forEach((u, i) => {
       const fig = policeFootFigs[i];
@@ -409,18 +417,22 @@
       refs.tailRotor.rotation.x += dt * 30;
       const on = !!h.spotOn;
       refs.cone.visible = on; refs.disc.visible = on;
-      if (refs.spot) {
-        refs.spot.visible = on;
-        if (on) {
-          refs.spot.position.set(h.x, h.y, h.z);
-          refs.spot.target.position.set(p.x, 0, p.z);
-          refs.spot.target.updateMatrixWorld();
-          refs.cone.position.set((h.x + p.x) / 2, h.y / 2, (h.z + p.z) / 2);
-          refs.cone.lookAt(p.x, 0, p.z);
-          refs.cone.rotateX(Math.PI / 2);
-          refs.cone.scale.set(1, h.y / 30, 1);
-          refs.disc.position.set(p.x, 0.14, p.z);
-        }
+      refs.spot.intensity = on ? 5000 : 0;
+      if (on) {
+        refs.spot.position.set(h.x, h.y, h.z);
+        refs.spot.target.position.set(p.x, 0, p.z);
+        refs.spot.target.updateMatrixWorld();
+        const dx = p.x - h.x, dz = p.z - h.z;
+        const dist = Math.hypot(dx, dz, h.y);
+        const r = Math.max(1.2, dist * 0.13);
+        refs.cone.position.set((h.x + p.x) / 2, h.y / 2, (h.z + p.z) / 2);
+        refs.cone.lookAt(p.x, 0, p.z);
+        refs.cone.rotateX(-Math.PI / 2);
+        refs.cone.scale.set(r, dist, r);
+        refs.cone.material.opacity = 0.15;
+        refs.disc.position.set(p.x, 0.14, p.z);
+        refs.disc.scale.setScalar(r + 0.6);
+        refs.disc.material.opacity = 0.32;
       }
       refs.beacon.visible = Math.floor(S.t * 1.6 + i) % 2 === 0;
     });
@@ -439,6 +451,7 @@
       refs.group.position.set(amb.x, 0, amb.z);
       refs.group.rotation.y = amb.ang;
       if (refs.wheels) for (const w of refs.wheels) w.rotation.x += amb.speed * dt * 1.9;
+      if (refs.lights && refs.lights.userData.setLevel) refs.lights.userData.setLevel(lightLevel / 2);
       const ph = Math.floor(S.t * 3 + i) % 2 === 0;
       refs.strobeA.visible = amb.state !== 'idle' && ph;
       refs.strobeB.visible = amb.state !== 'idle' && !ph;
@@ -609,25 +622,36 @@
     const p = S.player;
     S.weather.storm = false; S.weather.intensity = 0; S.stormI = 0;
     if (name === 'mission-day') {
-      S.hours = 10.5; p.x = 26; p.z = 36; p.ang = -0.7; ui.camYaw = -0.7;
+      S.hours = 10.5; p.x = 3.4; p.z = 40; p.ang = Math.PI + 0.35; ui.camYaw = Math.PI + 0.35; ui.camDist = 11;
     } else if (name === 'driving') {
       S.hours = 13.2;
-      const car = S.cars[0];
-      car.x = -28.6; car.z = -6; car.ang = 0; car.driver = false; car.parked = false; car.speed = 9;
-      p.mode = 'car'; p.carId = 0; p.x = car.x; p.z = car.z; p.ang = 0;
       ui.camYaw = 0;
     } else if (name === 'night-heli') {
       S.hours = 21.3;
-      p.x = 8; p.z = 46; p.ang = 2.6;
+      p.x = 3.4; p.z = 46; p.ang = 2.6;
       S.wanted.episode = true; S.wanted.ledger = 9; S.wanted.search = 1;
       S.helis[0].x = p.x - 30; S.helis[0].z = p.z - 24;
       S.helis[1].x = p.x + 38; S.helis[1].z = p.z + 16;
       ui.camYaw = 2.6;
     } else if (name === 'beach') {
-      S.hours = 15.4; p.x = 213; p.z = 2; p.ang = Math.PI / 2; ui.camYaw = Math.PI / 2;
+      S.hours = 15.4; p.x = 232; p.z = 42; p.ang = Math.PI / 2; ui.camYaw = Math.PI / 2 - 0.55;
     }
     const neutral = { moveX: 0, moveZ: 0, sprint: false, fire: false, handbrake: false, enterPressed: false, interactPressed: false, reloadPressed: false, weaponPressed: false, jumpPressed: false };
     for (let i = 0; i < 170; i++) sim.step(1 / 60, neutral);
+    if (name === 'night-heli') {
+      // compose the money shot: one heli low in frame, beam locked on the player
+      const h = S.helis[0];
+      h.x = p.x + 15; h.z = p.z - 24; h.y = 20; h.spotOn = true; h.mode = 'follow';
+      S.helis[1].spotOn = false;
+    }
+    if (name === 'driving') {
+      // stage the drive AFTER the settle steps, then roll briefly so traffic
+      // cannot shove the player's car off its lane before the capture
+      const car = S.cars[0];
+      car.x = -60.6; car.z = 100; car.ang = 0; car.driver = false; car.parked = false; car.speed = 0;
+      p.mode = 'car'; p.carId = 0; p.x = car.x; p.z = car.z; p.ang = 0;
+    }
+    if (name === 'beach') { p.x = 232; p.z = 42; p.y = 1.0; }
     S.starsCache = sim.stars();
     processEvents();
     syncActors(0.016);
@@ -645,10 +669,14 @@
 
   if (SHOT) {
     applyShot(SHOT);
-    setInterval(() => {
+    // repaint a few frames so the headless capturer settles on the staged scene
+    let paints = 0;
+    const paint = () => {
       syncActors(0.016);
       renderer.render(scene, camera);
-    }, 100);
+      if (++paints < 4) requestAnimationFrame(paint);
+    };
+    requestAnimationFrame(paint);
   } else {
     ui.showTitle(hasSaveAtBoot);
     requestAnimationFrame(frame);

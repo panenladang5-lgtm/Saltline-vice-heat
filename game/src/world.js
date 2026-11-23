@@ -245,7 +245,11 @@ const SLW = (() => {
       face.rotation.y = b.yaw;
       face.translateZ(0.08);
       g.add(face);
-      const back = face.clone(); back.rotation.y = b.yaw + Math.PI; back.translateZ(-0.16); g.add(back);
+      const back = face.clone();
+      back.rotation.set(0, b.yaw + Math.PI, 0);
+      back.position.set(b.x, panel.position.y, b.z);
+      back.translateZ(0.08);
+      g.add(back);
     }
     g.add(boardFlat.build(MAT_FLAT()));
 
