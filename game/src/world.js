@@ -111,6 +111,22 @@ const SLW = (() => {
         flat.box(b.w * 0.7, 0.12, 1.6, accent, b.x, 2.9, b.z + b.d / 2 + 0.9, 0, 0.32);
         basic.box(b.w * 0.7, 0.06, 0.2, rng() < 0.5 ? 0xff9b91 : 0x88eded, b.x, 2.72, b.z + b.d / 2 + 1.55);
       }
+      // signage variety, drawn from the building's own seed stream so the
+      // mix is stable: glazed shopfronts, blade signs over the pavement,
+      // and lit rooftop panels on the towers
+      if (rng() < 0.4) {
+        glass.box(b.w * 0.66, 2.3, 0.1, 0x2e4a5a, b.x - b.w * 0.08, 1.35, b.z + b.d / 2 + 0.07);
+        basic.box(b.w * 0.66, 0.1, 0.06, rng() < 0.5 ? 0xffd98a : 0x9be8ff, b.x - b.w * 0.08, 2.56, b.z + b.d / 2 + 0.12);
+      }
+      if (rng() < 0.24) {
+        const sx = b.x + (rng() < 0.5 ? -1 : 1) * (b.w / 2 - 0.7);
+        flat.box(0.14, 0.5, 1.1, 0x2c3e50, sx, 3.6, b.z + b.d / 2 + 0.55);
+        basic.box(0.1, 2.6, 0.85, [accent, 0xff5d73, 0x59d8c9, 0xffd166][Math.floor(rng() * 4)], sx, 4.9, b.z + b.d / 2 + 0.55);
+      }
+      if (tower && rng() < 0.45) {
+        basic.box(b.w * 0.52, 1.15, 0.14, [0xff5d73, 0x59d8c9, 0xffd166, 0xf8f4ec][Math.floor(rng() * 4)], b.x, b.h + 1.15, b.z + b.d / 2 + 0.1);
+        flat.box(b.w * 0.56, 0.18, 0.2, 0x2c3e50, b.x, b.h + 0.45, b.z + b.d / 2 + 0.1);
+      }
       // roof dressing
       if (tower) {
         flat.box(b.w * 0.6, 1.2, b.d * 0.6, 0xb7d5db, b.x, b.h + 0.6, b.z);
@@ -491,7 +507,11 @@ const SLW = (() => {
       skyUni.sunDir.value.copy(sunDir);
       skyUni.sunColor.value.copy(lerpHex(0xff9a52, 0xffe9c9, dayF));
       const focus = env.focus;
-      sun.position.set(focus.x + sunDir.x * 130, Math.max(sunDir.y, 0.06) * 130, focus.z + sunDir.z * 130);
+      // late in the day the shadow-casting sun rides lower than the sky
+      // disc, so golden hour throws long shadows down the avenues
+      const goldF = hrs > 12 ? THREE.MathUtils.clamp(1 - elev * 2.1, 0, 1) : 0;
+      const shadowY = Math.max(sunDir.y * (1 - 0.45 * goldF), 0.05);
+      sun.position.set(focus.x + sunDir.x * 130, shadowY * 130, focus.z + sunDir.z * 130);
       sun.target.position.copy(focus);
       if (env.lightning) lightning = 1;
       lightning = Math.max(0, lightning - dt * 6);
@@ -508,8 +528,8 @@ const SLW = (() => {
       fixMat.color.setScalar(0.12 + 0.88 * nightF);
       bulbMat.color.copy(lerpHex(0x49525c, 0xffdda7, nightF));
       litWinMat.color.copy(lerpHex(0x51606a, 0xffffff, Math.max(nightF, 0.25)));
-      sheenMat.opacity = 0.38 * storm;
-      pudMat.opacity = storm > 0.02 ? 0.8 * Math.min(1, storm + 0.25) : 0;
+      sheenMat.opacity = 0.58 * storm;
+      pudMat.opacity = storm > 0.02 ? 0.92 * Math.min(1, storm + 0.3) : 0;
       waterUni.time.value = env.t; waterUni.storm.value = storm;
       water.position.x = env.camPos.x; water.position.z = env.camPos.z;
       rainMat.opacity = 0.5 * storm;
