@@ -416,7 +416,7 @@ Wanted: stay unseen and the search bar drains to zero. Light offences are only r
       const bRescue = el('button', 'btn', death.card, `FIELD RESCUE — $${D.PRICES.rescue} (wake here at 65 hp)`);
       bRescue.disabled = S.player.money < D.PRICES.rescue;
       bRescue.addEventListener('click', () => { if (hooks.onRescue && hooks.onRescue()) closeM(death); });
-      const bRespawn = el('button', 'btn', death.card, `CLINIC RESPAWN — $${D.PRICES.respawn} (wake at the clinic)`);
+      const bRespawn = el('button', 'btn', death.card, `CLINIC RESPAWN — $${D.PRICES.respawn} (wake at the clinic — never more than you carry)`);
       bRespawn.addEventListener('click', () => { if (hooks.onRespawn && hooks.onRespawn()) closeM(death); });
       openM(death);
     };

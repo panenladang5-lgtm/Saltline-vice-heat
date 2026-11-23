@@ -804,7 +804,7 @@
       ui.drawMinimap(S, D);
       clockState.fpsCount++;
       const nowS = nowMs / 1000;
-      if (nowS - clockState.fpsT >= 1) { ui.fps = clockState.fpsCount * 2; clockState.fpsCount = 0; clockState.fpsT = nowS; }
+      if (nowS - clockState.fpsT >= 1) { ui.fps = clockState.fpsCount; clockState.fpsCount = 0; clockState.fpsT = nowS; }
     }
   }
 

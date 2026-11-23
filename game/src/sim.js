@@ -358,8 +358,8 @@ const SLS = (() => {
         car.ang += -car.steer * steerRate * dt * clamp(car.speed / 9, -1, 1) * grip;
       }
       car.fuel = Math.max(0, D.fuelBurn(car, thr, car.speed, dt));
-      if (car.fuel <= 0 && !car._fuelWarned) { car._fuelWarned = true; toast('Out of fuel — the engine cuts.'); }
-      if (car.fuel > 5) car._fuelWarned = false;
+      if (car.fuel <= 0 && !car._fuelWarned) { car._fuelWarned = true; car._fuelOut = true; toast('Out of fuel — the engine cuts.'); }
+      if (car.fuel > 5) { car._fuelWarned = false; car._fuelOut = false; }
       let nx = car.x + Math.sin(car.ang) * car.speed * dt;
       let nz = car.z + Math.cos(car.ang) * car.speed * dt;
       // waterline: cars never pass east x=219 (except they cannot float)
@@ -1595,13 +1595,13 @@ const SLS = (() => {
     }
     function respawn() {
       const p = S.player;
-      p.money -= D.PRICES.respawn;
+      p.money = Math.max(0, p.money - D.PRICES.respawn); // the clinic bills what you have, never more
       p.hp = 100; p.armour = 20; p.dead = false;
       p.mode = 'foot'; p.carId = -1; p.boatId = -1;
       p.x = D.SITES.clinic.x; p.z = D.SITES.clinic.z;
       S.wanted.episode = false; S.wanted.ledger = 0; S.wanted.points = 0; S.wanted.heatFloor = 0;
       S.wanted.report = null; S.wanted.minorCount = 0;
-      toast('You wake at the clinic. −$100, wanted cleared.');
+      toast('You wake at the clinic — the bill takes what you carry, up to $100. Wanted cleared.');
       return true;
     }
 

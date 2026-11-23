@@ -65,6 +65,10 @@ const SLA = (() => {
       for (const k in this.parts) this.group.add(this.parts[k]);
       this.group.add(this.blobs);
       this._d = new THREE.Object3D();
+      // scratch objects for set(): reused across every part of every ped
+      // instead of allocating four fresh objects per part per frame
+      this._local = new THREE.Matrix4(); this._m = new THREE.Matrix4();
+      this._e = new THREE.Euler(); this._sv = new THREE.Vector3();
     }
     // st: {x,z,ang,swing,mode,scale} mode: walk|idle|down|hide
     set(i, st) {
@@ -78,11 +82,11 @@ const SLA = (() => {
         d.position.set(st.x, baseY, st.z);
         d.rotation.set(0, st.ang, 0);
         d.updateMatrix();
-        const local = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(tiltX + rx, 0, 0));
+        const local = this._local.makeRotationFromEuler(this._e.set(tiltX + rx, 0, 0));
         local.setPosition(ox * HUMAN_SCALE, oy * HUMAN_SCALE, oz * HUMAN_SCALE);
-        const m = new THREE.Matrix4().multiplyMatrices(d.matrix, local);
-        if (hide) m.scale(new THREE.Vector3(0, 0, 0)); else m.scale(new THREE.Vector3(s, s, s));
-        part.setMatrixAt(i, m);
+        const m = this._m.multiplyMatrices(d.matrix, local);
+        if (hide) m.scale(this._sv.set(0, 0, 0)); else m.scale(this._sv.set(s, s, s));
+        part.setMatrixAt(i, m); // setMatrixAt copies the elements — reuse is safe
       };
       put(this.parts.torso, 0, 0.95, 0);
       put(this.parts.pelvis, 0, 0.62, 0);
