@@ -15,7 +15,16 @@ const SLS = (() => {
   function createSim(D, A, W) {
     const city = D.genCity(D.SEED);
     const story = D.createStory();
-    const weatherRng = D.stream(D.SEED + 3);
+    // the weather stream is counted, so a save can record how far it has
+    // run and a load can fast-forward it back to the same sequence (F22)
+    let weatherStream = D.stream(D.SEED + 3);
+    let weatherCalls = 0;
+    const weatherRng = () => { weatherCalls++; return weatherStream(); };
+    // dispatch draws from its own seeded stream: when a unit rolls out,
+    // where it appears and whether a driver bails are fixed by the seed,
+    // not by the wall clock — the dispatch/interceptor path is
+    // deterministic, which the old Math.random gates never were
+    const dispatchRng = D.stream(D.SEED + 7);
     const S = {
       t: 0, hours: 16 + 40 / 60, day: 1, phase: 'day',
       weather: D.genWeather(D.SEED + 3), stormI: 0,
@@ -565,7 +574,7 @@ const SLS = (() => {
       const consider = (e, x, z, r) => {
         const dx = x - p.x, dz = z - p.z;
         const d2 = dx * dx + dz * dz;
-        if (d2 > bd || d2 < 0.5) return;
+        if (d2 > bd || (wpn === 'sidearm' && d2 < 0.5)) return; // the gun keeps a minimum range; a baton swing must also land point-blank
         let da = Math.atan2(dx, dz) - aim;
         while (da > Math.PI) da -= Math.PI * 2; while (da < -Math.PI) da += Math.PI * 2;
         if (Math.abs(da) < 0.16 && !losBlocked(p.x, p.z, x, z)) { bd = d2; best = e; }
@@ -725,12 +734,12 @@ const SLS = (() => {
       const u = S.policeCars.find(u => !u.active);
       if (!u) return;
       const p = S.player;
-      const a = Math.random() * Math.PI * 2;
-      const r = 95 + Math.random() * 25;
+      const a = dispatchRng() * Math.PI * 2;
+      const r = 95 + dispatchRng() * 25;
       let x = clamp(p.x + Math.sin(a) * r, -205, 205), z = clamp(p.z + Math.cos(a) * r, -205, 205);
       // snap to nearest road
       const snap = (v) => D.ROADS.reduce((q, c) => Math.abs(c - v) < Math.abs(q - v) ? c : q, D.ROADS[0]);
-      if (Math.random() < 0.5) x = snap(x); else z = snap(z);
+      if (dispatchRng() < 0.5) x = snap(x); else z = snap(z);
       u.active = true; u.x = x; u.z = z; u.ang = Math.atan2(p.x - x, p.z - z);
       u.speed = 0; u.hp = 140; u.hasDriver = true; u.retireT = 0;
       // from three stars, the first unit out runs interceptor: it drives to
@@ -744,11 +753,11 @@ const SLS = (() => {
       const u = S.policeFoot.find(u => !u.active);
       if (!u) return null;
       const p = S.player;
-      const a = Math.random() * Math.PI * 2;
+      const a = dispatchRng() * Math.PI * 2;
       u.active = true;
       u.x = fromCar ? fromCar.x + 2 : clamp(p.x + Math.sin(a) * 70, -210, 210);
       u.z = fromCar ? fromCar.z + 2 : clamp(p.z + Math.cos(a) * 70, -210, 210);
-      u.hp = 100; u.fireCd = 1 + Math.random();
+      u.hp = 100; u.fireCd = 1 + dispatchRng();
       u.fromCar = fromCar ? S.policeCars.indexOf(fromCar) : -1;
       emit({ k: 'policespawn', e: u });
       return u;
@@ -761,8 +770,8 @@ const SLS = (() => {
         const wantCars = D.DISPATCH_CAR[st], wantFoot = D.DISPATCH_FOOT[st];
         const haveCars = S.policeCars.filter(u => u.active).length;
         const haveFoot = S.policeFoot.filter(u => u.active).length;
-        if (haveCars < wantCars && Math.random() < dt * 0.7) spawnPoliceCar();
-        if (haveFoot < Math.max(0, wantFoot - haveCars) && Math.random() < dt * 0.4) spawnPoliceFoot(null);
+        if (haveCars < wantCars && dispatchRng() < dt * 0.7) spawnPoliceCar();
+        if (haveFoot < Math.max(0, wantFoot - haveCars) && dispatchRng() < dt * 0.4) spawnPoliceFoot(null);
       }
       // sight + lookout
       const sightOf = (ux, uz, range) => {
@@ -814,7 +823,7 @@ const SLS = (() => {
           if (pc) { damageCar(pc, 6, false); emit({ k: 'sfx', name: 'bump' }); }
         }
         // bail out near a slow / on-foot player
-        if (u.hasDriver && d < 24 && p.mode === 'foot' && Math.random() < dt * 0.8) {
+        if (u.hasDriver && d < 24 && p.mode === 'foot' && dispatchRng() < dt * 0.8) {
           const f = spawnPoliceFoot(u);
           if (f) { u.hasDriver = false; u.speed = 0; }
         }
@@ -950,8 +959,11 @@ const SLS = (() => {
     function spawnGuards(x, z, count) {
       S.guards = [];
       for (let i = 0; i < count; i++) {
+        // posts are pushed out of any building footprint: the third Port
+        // Sol post used to land inside the warehouse at (151,170)
+        const post = collideBuildings(x + (i - 1) * 4.5, z + (i % 2) * 4 - 2, 0.5);
         S.guards.push({
-          x: x + (i - 1) * 4.5, z: z + (i % 2) * 4 - 2, ang: Math.PI, hp: 70,
+          x: post.x, z: post.z, ang: Math.PI, hp: 70,
           fireCd: 1.2 + i * 0.5, down: false, aggro: false, counted: false, neutral: false, fig: null, swing: 0,
         });
       }
@@ -1418,7 +1430,12 @@ const SLS = (() => {
       if (st && st.kind === 'combat') return null;
       // Mara: accept or search cut
       if (dist(p, D.SITES.mara) < 5) {
-        if (S.wanted.episode) return { label: `Search cut at Mara — $${D.PRICES.searchCut} (halves the search)`, act: 'searchcut' };
+        if (S.wanted.episode) {
+          // while an episode runs, Mara cannot hand out work — the prompt
+          // says so itself instead of silently offering only the cut
+          if (story.active === null && story.done < 6) return { label: `Too hot to take contract ${story.done + 1} — clear your wanted first. Search cut — $${D.PRICES.searchCut} (halves the search)`, act: 'searchcut' };
+          return { label: `Search cut at Mara — $${D.PRICES.searchCut} (halves the search)`, act: 'searchcut' };
+        }
         if (story.active === null && story.done < 6) return { label: `Accept contract ${story.done + 1}: ${D.CONTRACTS[story.done].title}`, act: 'accept' };
         return { label: 'Mara has nothing new right now', act: null };
       }
@@ -1553,6 +1570,10 @@ const SLS = (() => {
         toast('Rested. Progress saved.');
         saveGame();
       } else if (act === 'quickfix') {
+        // the price is checked before the channel starts: a fix the
+        // player cannot pay for says so now, instead of failing in
+        // silence when the two seconds run out
+        if (p.money < D.PRICES.quickFix) { toast('Not enough cash for the quick fix.'); return; }
         S.channel = { kind: 'quickfix', t: 0, need: 2 };
       } else if (act === 'cleanplate') {
         const own = nearestOwnCar(3.5);
@@ -1611,7 +1632,7 @@ const SLS = (() => {
       let car = currentCar();
       if (!car) car = S.cars.find(c => c.owned && !c.gone) || null;
       if (!car) return null;
-      return { id: car.id, type: car.type, x: car.x, z: car.z, ang: car.ang, hp: car.hp, color: car.color, mission: car.mission, owned: car.owned, stolen: car.stolen, driving: p.carId === car.id, fuel: car.fuel };
+      return { id: car.id, type: car.type, x: car.x, z: car.z, ang: car.ang, hp: car.hp, color: car.color, mission: car.mission, owned: car.owned, stolen: car.stolen, driving: p.carId === car.id, fuel: car.fuel, lane: car.axis ? { axis: car.axis, road: car.road, dir: car.dir } : null };
     }
     function beginSession() { S.sessionLive = true; }
     function saveGame() {
@@ -1631,6 +1652,16 @@ const SLS = (() => {
       snap.races = S.raceRecords;
       snap.coastBest = S.coastBest;
       snap.cooldowns = { quickFix: S.cooldowns.quickFix, cleanPlate: S.cooldowns.cleanPlate };
+      // the wanted state is part of the save: a reload must not be a
+      // free wanted-clear (it also erased contract 4's forced heat on
+      // demand). The pending witness report is stored as seconds
+      // remaining, so it survives the sim clock restarting at zero.
+      const w = S.wanted;
+      snap.wanted = {
+        ledger: w.ledger, points: w.points, episode: w.episode, search: w.search, heatFloor: w.heatFloor, minorCount: w.minorCount,
+        report: w.report ? { in: Math.max(0, w.report.at - S.t), pts: w.report.pts, x: w.report.x, z: w.report.z } : null,
+      };
+      snap.weatherCalls = weatherCalls;
       snap.stats = { ...S.stats };
       snap.settings = { ...S.settings };
       try {
@@ -1657,11 +1688,30 @@ const SLS = (() => {
       S.cooldowns.cleanPlate = snap.cooldowns.cleanPlate || 0;
       S.stats = { ...snap.stats };
       S.settings = { ...snap.settings };
+      // restore the wanted state and the weather sequence (F22): older
+      // saves carry the zero defaults from defaultSave, so both are a
+      // no-op for them
+      const sw = snap.wanted || {};
+      const w = S.wanted;
+      w.ledger = sw.ledger || 0; w.points = sw.points || 0; w.episode = !!sw.episode;
+      w.search = sw.search || 0; w.heatFloor = sw.heatFloor || 0; w.minorCount = sw.minorCount || 0;
+      w.report = sw.report ? { at: S.t + (sw.report.in || 0), pts: sw.report.pts, x: sw.report.x, z: sw.report.z } : null;
+      weatherStream = D.stream(D.SEED + 3); weatherCalls = 0;
+      const wc = snap.weatherCalls || 0;
+      while (weatherCalls < wc) weatherRng();
       if (snap.car) {
         const car = S.cars.find(c => c.id === snap.car.id);
         if (car) {
           Object.assign(car, { x: snap.car.x, z: snap.car.z, ang: snap.car.ang, hp: snap.car.hp, mission: snap.car.mission, owned: snap.car.owned, stolen: snap.car.stolen, fuel: snap.car.fuel, parked: !snap.car.driving, driver: false });
-          if (snap.car.driving) { p.mode = car.type === 'bike' ? 'bike' : 'car'; p.carId = car.id; p.x = car.x; p.z = car.z; }
+          if (snap.car.driving && snap.car.lane && !snap.car.owned && !snap.car.mission) {
+            // a stolen circulating car saved mid-drive rejoins traffic
+            // on load, instead of coming back driverless and shrinking
+            // the fleet by one per save cycle; the player is restored
+            // on foot at the saved driver position
+            car.axis = snap.car.lane.axis; car.road = snap.car.lane.road; car.dir = snap.car.lane.dir;
+            car.along = car.axis === 'NS' ? car.z : car.x;
+            car.driver = true; car.parked = false; car.speed = 0; car._curb = 0;
+          } else if (snap.car.driving) { p.mode = car.type === 'bike' ? 'bike' : 'car'; p.carId = car.id; p.x = car.x; p.z = car.z; }
         }
       }
       for (const i of S.shellsGot) emit({ k: 'shellhide', i });

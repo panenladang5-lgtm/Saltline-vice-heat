@@ -229,11 +229,11 @@ function genVehicles(seed) {
     const road = Math.floor(rng() * 7);
     const dir = rng() < 0.5 ? 1 : -1;
     cars.push({
-      id, type: vehicleTypeFor(id), axis, road, dir,
+      id, type: i < 7 ? 'bike' : vehicleTypeFor(id), axis, road, dir,
       along: -192 + rng() * 384, speed: 8 + rng() * 7,
       hp: 100, color: PAINT[Math.floor(rng() * 9)],
       driver: true, parked: false, owned: false, mission: false,
-      bike: i < 7, // first 7 circulating drivers phase in as bikes
+      bike: i < 7, // the first 7 circulating drivers ride bikes (see type)
     });
   }
   // 14 more parked, ids 64..77 (16 parked total incl. ids 0 and 1)
@@ -323,6 +323,32 @@ function racePar(points) {
   let len = 0;
   for (let i = 1; i < points.length; i++) len += Math.hypot(points[i].x - points[i - 1].x, points[i].z - points[i - 1].z);
   return len / 12.5;
+}
+
+// ---------- camera path ----------
+// March from the camera anchor toward the desired camera position and
+// stop at the last sample that is not inside a building footprint
+// (footprints widened by a margin, rooftops cleared by a small step):
+// the follow camera can hug a wall but never ends up inside one.
+function cameraClamp(ax, ay, az, bx, by, bz, buildings) {
+  const dx = bx - ax, dy = by - ay, dz = bz - az;
+  const len = Math.hypot(dx, dy, dz);
+  if (len < 1e-6) return { x: bx, y: by, z: bz };
+  const steps = Math.max(1, Math.ceil(len / 0.75));
+  const blocked = (x, y, z) => {
+    for (const b of buildings) {
+      if (y < b.h + 0.4 && Math.abs(x - b.x) < b.w / 2 + 0.5 && Math.abs(z - b.z) < b.d / 2 + 0.5) return true;
+    }
+    return false;
+  };
+  let lx = ax, ly = ay, lz = az;
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const x = ax + dx * t, y = ay + dy * t, z = az + dz * t;
+    if (blocked(x, y, z)) return { x: lx, y: ly, z: lz };
+    lx = x; ly = y; lz = z;
+  }
+  return { x: bx, y: by, z: bz };
 }
 
 // ---------- fuel ----------
@@ -474,6 +500,8 @@ function defaultSave() {
     weather: { storm: false, intensity: 0, phasesLeft: 0 },
     standing: { 'OLD QUARTER': 10, 'GLASS DISTRICT': 10, 'CORAL HEIGHTS': 10, 'LITTLE PALM': 10, 'PORT SOL': 10, 'SUNSTRAND BEACH': 10 },
     shells: [], races: {}, coastBest: 0, cooldowns: { quickFix: 0, cleanPlate: 0 },
+    wanted: { ledger: 0, points: 0, episode: false, search: 0, heatFloor: 0, minorCount: 0, report: null },
+    weatherCalls: 0,
     stats: { distance: 0, contracts: 0, earned: 0, crashes: 0, shots: 0, races: 0, kills: 0 },
     settings: { volume: 0.55, music: true },
   };
@@ -496,7 +524,7 @@ return {
   RACES, COAST_RUN, PIERS, BOATS, PARKING, DISTRICT_BOARDS, HELI_ROUTE,
   genPeds, pedPos, VEHICLE_STATS, genVehicles, starsFromCasualties, DISPATCH_FOOT, DISPATCH_CAR,
   searchDecayRate, ledgerBelowBand, tierOf, priceWithDiscount, roadRouteLength, taxiFare,
-  taxiTimeLimit, taxiDestination, robberyPay, CHOP_PAY, chopEligible, racePar, FUEL_TANK, fuelBurn,
+  taxiTimeLimit, taxiDestination, robberyPay, CHOP_PAY, chopEligible, racePar, cameraClamp, FUEL_TANK, fuelBurn,
   genWeather, weatherPhaseBoundary, CHAPTERS, CONTRACTS, chapterOf, createStory, PRICES, HELP_TEXT,
 };
 })();

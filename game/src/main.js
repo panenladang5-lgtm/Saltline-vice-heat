@@ -471,6 +471,7 @@
       refs.group.rotation.y = car.ang;
       if (refs.wheels) for (const w of refs.wheels) w.rotation.x += car.speed * dt * 1.9;
       if (refs.driverFig) refs.driverFig.group.visible = !!car.driver;
+      if (refs.rider) refs.rider.group.visible = !!car.driver || S.player.carId === car.id; // a parked bike carries no phantom rider
       if (refs.lights && refs.lights.userData.setLevel) refs.lights.userData.setLevel(lightLevel / 2);
       const smoke = smokeMeshes.get(car.id);
       if (car.hp < 35) {
@@ -783,7 +784,12 @@
         camAnchor.x += (p.x - camAnchor.x) * k;
         camAnchor.z += (p.z - camAnchor.z) * k;
         camAnchor.y += (ty - camAnchor.y) * k;
-        camera.position.set(camAnchor.x - fx * dist, camAnchor.y + dist * 0.42, camAnchor.z - fz * dist);
+        // the camera may hug a building but never ends up inside one:
+        // the path from the anchor to the desired spot stops at the
+        // last point outside every footprint
+        const camPos = D.cameraClamp(camAnchor.x, camAnchor.y, camAnchor.z,
+          camAnchor.x - fx * dist, camAnchor.y + dist * 0.42, camAnchor.z - fz * dist, city.buildings);
+        camera.position.set(camPos.x, camPos.y, camPos.z);
         camera.lookAt(camAnchor.x + fx * 7, camAnchor.y + 0.4, camAnchor.z + fz * 7);
         // the field of view opens up with speed
         const targetFov = (p.mode === 'car' || p.mode === 'bike') ? 58 + Math.min(1, Math.abs(p.speedNow) / 38) * 9 : 58;
