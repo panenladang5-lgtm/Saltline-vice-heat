@@ -156,26 +156,6 @@ const SLW = (() => {
     g.add(glass.build(MAT_GLASS()));
     const litWinMat = new THREE.MeshBasicMaterial({ vertexColors: true });
     g.add(litWin.build(litWinMat, false));
-    // a second window layer that only wakes after dark: extra lit windows
-    // (own deterministic stream per building) faded in by the night factor,
-    // so the towers feel inhabited once the PLN layer is on
-    const nightWin = new Batch();
-    for (const b of city.buildings) {
-      const rngN = D.stream(b.seed + 777);
-      const cols = Math.max(2, Math.floor(b.w / 2.3)), rows = Math.max(2, Math.min(16, Math.floor(b.h / 3.1)));
-      for (let k = 0; k < 7; k++) {
-        const f = Math.floor(rngN() * 2);
-        const cx = Math.floor(rngN() * cols), ry = Math.floor(rngN() * rows);
-        const u = (cx + 0.5) / cols - 0.5, v = (ry + 0.5) / rows;
-        const wy = 1.6 + v * (b.h - 2.4);
-        let wx, wz, ryaw = 0;
-        if (f === 0) { wx = b.x + u * b.w; wz = b.z + b.d / 2 + 0.05; }
-        else { wx = b.x - u * b.w; wz = b.z - b.d / 2 - 0.05; ryaw = Math.PI; }
-        nightWin.box(1.15, 1.5, 0.06, twinkle[Math.floor(rngN() * 4)], wx, wy, wz, ryaw);
-      }
-    }
-    const nightWinMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0 });
-    g.add(nightWin.build(nightWinMat, false));
     g.add(basic.build(MAT_BASIC(), false));
 
     // ---- street lamps + PLN decals ----
@@ -271,17 +251,6 @@ const SLW = (() => {
         const len = 2.12 + rng() * 1.26;
         const yaw = (lf / 9) * Math.PI * 2 + rng() * 0.5;
         palmFlat.add(paint(leafGeo(len), leafPal[Math.floor(rng() * 4)]), topX, p.h + 0.1, topZ, yaw, -0.85 - rng() * 0.4, 0);
-      }
-      // a fuller crown: a second, more upright ring of shorter fronds,
-      // plus a coconut cluster tucked under it
-      for (let lf = 0; lf < 6; lf++) {
-        const len = 1.45 + rng() * 0.85;
-        const yaw = (lf / 6) * Math.PI * 2 + rng() * 0.6 + 0.35;
-        palmFlat.add(paint(leafGeo(len), leafPal[Math.floor(rng() * 4)]), topX, p.h + 0.18, topZ, yaw, -0.42 - rng() * 0.3, 0);
-      }
-      for (let cn = 0; cn < 3; cn++) {
-        const ca = rng() * Math.PI * 2;
-        palmFlat.sph(0.11, 0x6b5136, topX + Math.cos(ca) * 0.17, p.h - 0.04, topZ + Math.sin(ca) * 0.17);
       }
     }
     const palmMesh = palmFlat.build(MAT_FLAT());
@@ -445,8 +414,7 @@ const SLW = (() => {
           float foam = foamBand * (0.5 + 0.5 * sin(vW.x * 0.8 + vW.z * 0.6 + time * 1.7));
           col = mix(col, vec3(0.9, 0.95, 0.95), clamp(foam, 0.0, 1.0) * 0.5);
           float glit = pow(max(0.0, sin(vW.x * 1.7 + time * 2.0) * sin(vW.z * 1.9 - time * 1.6)), 12.0);
-          float gmask = 0.35 + 0.65 * (0.5 + 0.5 * sin(vW.x * 0.21 + time * 0.3) * sin(vW.z * 0.17 - time * 0.22));
-          col += vec3(1.0, 0.9, 0.7) * glit * 0.55 * gmask;
+          col += vec3(1.0, 0.9, 0.7) * glit * 0.55;
           float sheen = pow(max(0.0, sin(vW.x * 0.55 - time * 0.9) * sin(vW.z * 0.5 + time * 0.7)), 6.0);
           col += vec3(1.0, 0.72, 0.45) * sheen * 0.09;
           gl_FragColor = vec4(col, 1.0);
@@ -496,8 +464,7 @@ const SLW = (() => {
       let horizon = lerpHex(0x333f6b, 0xbfe3da, dayF);
       let top = lerpHex(0x101736, 0x4ba6d6, dayF);
       if (duskF > 0.03 && dayF > 0.02) {
-        horizon.lerp(_c2.setHex(0xf8a96a), duskF * 0.72);
-        top.lerp(_c2.setHex(0x8a5570), duskF * 0.22);
+        horizon.lerp(_c2.setHex(0xf8bd8d), duskF * 0.72);
       }
       if (storm > 0.02) { horizon.lerp(_c2.setHex(0x67707c), storm * 0.8); top.lerp(_c2.setHex(0x39424e), storm * 0.8); }
       skyUni.horizonColor.value.copy(horizon);
@@ -511,29 +478,24 @@ const SLW = (() => {
       skyUni.sunDir.value.copy(sunDir);
       skyUni.sunColor.value.copy(lerpHex(0xff9a52, 0xffe9c9, dayF));
       const focus = env.focus;
-      // late in the day the shadow-casting sun rides lower than the sky
-      // disc, so golden hour throws long shadows down the avenues
-      const goldF = hrs > 12 ? THREE.MathUtils.clamp(1 - elev * 2.1, 0, 1) : 0;
-      const shadowY = Math.max(sunDir.y * (1 - 0.45 * goldF), 0.05);
-      sun.position.set(focus.x + sunDir.x * 130, shadowY * 130, focus.z + sunDir.z * 130);
+      sun.position.set(focus.x + sunDir.x * 130, Math.max(sunDir.y, 0.05) * 130, focus.z + sunDir.z * 130);
       sun.target.position.copy(focus);
       if (env.lightning) lightning = 1;
       lightning = Math.max(0, lightning - dt * 6);
       sun.intensity = 2.04 * (0.18 + 0.82 * dayF) * (1 - 0.5 * storm) + lightning * 1.5;
       sun.color.copy(lerpHex(0xff9a52, 0xffd4aa, dayF));
       hemi.intensity = 1.52 * (0.5 + 0.5 * dayF) + lightning * 0.7;
-      hemi.color.copy(lerpHex(0x8b9aca, 0xfff2db, dayF));
+      hemi.color.copy(lerpHex(0x8b9aca, 0xffefd8, dayF));
       tlMeshA.visible = (env.lightPhase ?? 0) === 0;
       tlMeshB.visible = !tlMeshA.visible;
-      nightWinMat.opacity = 0.9 * nightF;
       haloMat.opacity = 0.85 * nightF;
       poolMat.opacity = 0.5 * nightF;
       facePoolMat.opacity = 0.5 * nightF;
       fixMat.color.setScalar(0.12 + 0.88 * nightF);
       bulbMat.color.copy(lerpHex(0x49525c, 0xffdda7, nightF));
-      litWinMat.color.copy(lerpHex(0x51606a, 0xffffff, Math.max(nightF, 0.25)));
-      sheenMat.opacity = 0.58 * storm;
-      pudMat.opacity = storm > 0.02 ? 0.92 * Math.min(1, storm + 0.3) : 0;
+      litWinMat.color.copy(lerpHex(0x17303b, 0xffffff, Math.max(nightF, 0.25)));
+      sheenMat.opacity = 0.38 * storm;
+      pudMat.opacity = storm > 0.02 ? 0.80 * Math.min(1, storm + 0.3) : 0;
       waterUni.time.value = env.t; waterUni.storm.value = storm;
       water.position.x = env.camPos.x; water.position.z = env.camPos.z;
       rainMat.opacity = 0.5 * storm;
