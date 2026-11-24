@@ -992,5 +992,236 @@ function clearWanted(S) { const w = S.wanted; w.ledger = 0; w.points = 0; w.epis
 }
 
 
+// ================= ROUND 6 — v1 look alignment + the last audit bugs =====
+// Package A is render-side; its values are pinned by source guards in the
+// suite's own precedent (the F5/F13/F28/F11 block). Package B is behaviour:
+// real bikes, a save that keeps your wanted level, a camera that stays out
+// of buildings, guard posts on open ground, and deterministic dispatch.
+
+// ---- round 6: source guards for the v1 graphics alignment ----
+{
+  const fs = require('node:fs');
+  const worldSrc = fs.readFileSync(new URL('../game/src/world.js', import.meta.url), 'utf8');
+  ok(!worldSrc.includes('nightWin'), 'look: the second night lit-window layer is gone (single v1 layer)');
+  ok(!worldSrc.includes('0x6b5136'), 'look: palm crowns carry no coconut cluster (the v1 9-frond crown)');
+  ok(worldSrc.includes('sheenMat.opacity = 0.38 * storm'), 'look: storm wet sheen back at the v1 strength');
+  ok(worldSrc.includes('0xf8bd8d'), 'look: the dusk band uses the v1 gold');
+  ok(!worldSrc.includes('0x8a5570'), 'look: the unreferenced purple dusk zenith tint is gone');
+  ok(worldSrc.includes('lerpHex(0x17303b, 0xffffff'), 'look: lit windows darken toward the v1 day tone');
+}
+
+// ---- round 6: the circulating bikes are real bikes (F9) ----
+{
+  const bikes = veh.cars.filter(c => c.type === 'bike');
+  eq(bikes.length, 7, 'bikes: seven circulating vehicles carry the bike type (F9)');
+  ok(bikes.every(c => c.driver && c.bike), 'bikes: all seven are driven, flagged riders (F9)');
+  ok(bikes.every(c => c.id >= 2 && c.id <= 8), 'bikes: they are the first seven circulating drivers (F9)');
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const riders = S.cars.filter(c => c.type === 'bike' && c.driver);
+  eq(riders.length, 7, 'bikes: the sim fields seven ridden bikes (F9)');
+  const b0 = riders[0];
+  const x0 = b0.x, z0 = b0.z;
+  run(sim, 4, IN());
+  ok(Number.isFinite(b0.x) && Number.isFinite(b0.z), 'bikes: positions stay finite in traffic (F9)');
+  ok(Math.abs(b0.x - x0) > 0.5 || Math.abs(b0.z - z0) > 0.5, 'bikes: a circulating bike actually circulates (F9)');
+  // steal one and ride it away: the player mode is the bike mode
+  const bike = riders[1];
+  bike.speed = 0; p.mode = 'foot'; p.carId = -1; p.x = bike.x; p.z = bike.z;
+  sim.step(1 / 60, IN({ enterPressed: true }));
+  eq(p.mode, 'bike', 'bikes: entering a circulating bike puts the player on a bike (F9)');
+  const bx = bike.x, bz = bike.z;
+  run(sim, 2, IN({ moveZ: 1 }));
+  ok(Math.hypot(bike.x - bx, bike.z - bz) > 2, 'bikes: the stolen bike drives away under power (F9)');
+  // render side: the mesh binding + rider visibility ride the type
+  const fs = require('node:fs');
+  const mainSrc = fs.readFileSync(new URL('../game/src/main.js', import.meta.url), 'utf8');
+  ok(mainSrc.includes("car.type === 'bike') refs = SLA.makeBikeMesh(car.color)"), 'bikes: the renderer builds the bike mesh for the type (F9)');
+  ok(mainSrc.includes('refs.rider.group.visible = !!car.driver || S.player.carId === car.id'), 'bikes: the rider shows only while the bike is ridden (F9)');
+}
+
+// ---- round 6: the camera cannot enter a building (F32) ----
+{
+  const bs = [{ x: 15, z: 0, w: 10, d: 10, h: 20 }, { x: -40, z: 30, w: 12, d: 12, h: 8 }];
+  const free = D.cameraClamp(0, 1.5, 0, -30, 6, 0, bs);
+  eq(free.x, -30, 'camera: an unobstructed path reaches the desired spot (F32)');
+  const hit = D.cameraClamp(0, 1.5, 0, 30, 6, 0, bs);
+  ok(!(Math.abs(hit.x - 15) < 5.5 && Math.abs(hit.z) < 5.5 && hit.y < 20.4), 'camera: the clamped spot is outside the footprint (F32)');
+  ok(hit.x < 10.26, `camera: the camera stops at the wall face (x=${hit.x.toFixed(2)}) (F32)`);
+  const over = D.cameraClamp(-40, 30, 0, -40, 30, 60, bs);
+  eq(over.z, 60, 'camera: passing over a low roof is not clamped (F32)');
+  const level = D.cameraClamp(0, 25, 0, 30, 25, 0, bs);
+  eq(level.x, 30, 'camera: above the roofline the path is free (F32)');
+  const fs = require('node:fs');
+  const mainSrc = fs.readFileSync(new URL('../game/src/main.js', import.meta.url), 'utf8');
+  ok(mainSrc.includes('D.cameraClamp('), 'camera: the frame loop routes the follow camera through the clamp (F32)');
+}
+
+// ---- round 6: a reload is not a free wanted-clear (F22) ----
+{
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: k => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, String(v)); },
+    removeItem: k => { store.delete(k); },
+  };
+  const sim = mkSim(); const S = sim.S;
+  sim.beginSession();
+  const w = S.wanted;
+  w.ledger = 6; w.points = 1; w.episode = true; w.search = 0.5; w.heatFloor = 2; w.minorCount = 2;
+  w.report = { at: S.t + 2.5, pts: 1, x: 40, z: -30 };
+  sim.saveGame();
+  const sim2 = mkSim(); const S2 = sim2.S;
+  ok(sim2.loadGame(), 'wanted save: the save loads into a fresh sim (F22)');
+  const w2 = S2.wanted;
+  eq(w2.ledger, 6, 'wanted save: the casualty ledger survives the reload (F22)');
+  eq(w2.points, 1, 'wanted save: offence points survive (F22)');
+  eq(w2.episode, true, 'wanted save: the episode survives — no free clear (F22)');
+  eq(w2.heatFloor, 2, 'wanted save: forced heat survives — contract 4 cannot be dodged (F22)');
+  eq(sim2.stars(), 3, 'wanted save: the star level is unchanged by the reload (F22)');
+  ok(w2.report !== null && Math.abs(w2.report.at - 2.5) < 0.001, 'wanted save: the pending witness report keeps its remaining time (F22)');
+  delete globalThis.localStorage;
+}
+
+// ---- round 6: the weather sequence resumes across a reload (F22) ----
+{
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: k => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, String(v)); },
+    removeItem: k => { store.delete(k); },
+  };
+  const sim = mkSim(); const S = sim.S;
+  sim.beginSession();
+  S.hours = 18.4; // minutes before the dusk phase boundary
+  let guardW = 0;
+  while (S.phase !== 'night' && guardW++ < 60 * 30) sim.step(1 / 60, IN());
+  eq(S.phase, 'night', 'weather save: the dusk boundary is crossed');
+  sim.saveGame();
+  const calls1 = JSON.parse(store.get(D.SAVE_KEY)).weatherCalls;
+  ok(calls1 >= 1, `weather save: the save records the stream position (${calls1} draws) (F22)`);
+  const sim2 = mkSim();
+  ok(sim2.loadGame(), 'weather save: the save loads (F22)');
+  sim2.beginSession();
+  sim2.saveGame();
+  eq(JSON.parse(store.get(D.SAVE_KEY)).weatherCalls, calls1, 'weather save: the stream position round-trips — no sequence restart (F22)');
+  delete globalThis.localStorage;
+}
+
+// ---- round 6: a stolen circulating car rejoins traffic after a reload (F22) ----
+{
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: k => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, String(v)); },
+    removeItem: k => { store.delete(k); },
+  };
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  sim.beginSession();
+  const car = S.cars.find(c => c.driver && c.type !== 'bike');
+  car.speed = 0; p.mode = 'foot'; p.carId = -1; p.x = car.x; p.z = car.z;
+  sim.step(1 / 60, IN({ enterPressed: true }));
+  eq(p.carId, car.id, 'fleet save: the player is driving the stolen car');
+  eq(car.stolen, true, 'fleet save: the car is marked stolen');
+  sim.saveGame();
+  const sim2 = mkSim(); const S2 = sim2.S;
+  ok(sim2.loadGame(), 'fleet save: the save loads (F22)');
+  const back = S2.cars.find(c => c.id === car.id);
+  eq(back.driver, true, 'fleet save: the stolen car circulates again — the fleet does not shrink (F22)');
+  eq(back.parked, false, 'fleet save: the stolen car is not restored parked (F22)');
+  eq(S2.player.carId, -1, 'fleet save: the player is restored on foot beside it (F22)');
+  run(sim2, 2, IN());
+  ok(Number.isFinite(back.x) && Number.isFinite(back.z), 'fleet save: the rejoined car holds a finite lane position (F22)');
+  delete globalThis.localStorage;
+}
+
+// ---- round 6: guard posts stand outside every building footprint ----
+{
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  S.story.done = 2;
+  p.x = D.SITES.mara.x; p.z = D.SITES.mara.z; p.mode = 'foot';
+  sim.step(1 / 60, IN({ interactPressed: true }));
+  eq(S.guards.length, 3, 'guard posts: contract 3 fields three guards');
+  for (const g of S.guards) {
+    ok(!c1.buildings.some(b => Math.abs(g.x - b.x) < b.w / 2 && Math.abs(g.z - b.z) < b.d / 2), `guard posts: the post at (${g.x.toFixed(1)}, ${g.z.toFixed(1)}) is outside every footprint`);
+  }
+  const sim6 = mkSim(); const S6 = sim6.S; const p6 = S6.player;
+  S6.story.done = 5;
+  p6.x = D.SITES.mara.x; p6.z = D.SITES.mara.z; p6.mode = 'foot';
+  sim6.step(1 / 60, IN({ interactPressed: true }));
+  eq(S6.guards.length, 3, 'guard posts: contract 6 fields three raiders');
+  for (const g of S6.guards) {
+    ok(!c1.buildings.some(b => Math.abs(g.x - b.x) < b.w / 2 && Math.abs(g.z - b.z) < b.d / 2), `guard posts: the raider at (${g.x.toFixed(1)}, ${g.z.toFixed(1)}) is outside every footprint`);
+  }
+}
+
+// ---- round 6: the small frictions (F33) ----
+{
+  // (i) Mara's prompt names the blocked contract while an episode runs
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  p.x = D.SITES.mara.x; p.z = D.SITES.mara.z; p.mode = 'foot';
+  S.wanted.episode = true; S.wanted.ledger = 1; S.wanted.search = 1;
+  const info = sim.interactInfo();
+  ok(info && info.act === 'searchcut', 'mara prompt: the search cut stays on offer while wanted (F33)');
+  ok(info && info.label.includes('Too hot to take contract 1'), 'mara prompt: the blocked contract is explained on the prompt (F33)');
+  clearWanted(S);
+  const info2 = sim.interactInfo();
+  ok(info2 && info2.act === 'accept', 'mara prompt: with a clean record the contract is offered again (F33)');
+}
+{
+  // (ii) the quick fix refuses up front when the player cannot pay
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const car = S.cars[0];
+  car.hp = 50; car.speed = 0; car.parked = false;
+  p.mode = 'car'; p.carId = 0; p.x = car.x; p.z = car.z; p.money = 20;
+  const ev0 = S.events.length;
+  sim.step(1 / 60, IN({ interactPressed: true }));
+  eq(S.channel, null, 'quick fix: no channel starts without the $35 (F33)');
+  ok(S.events.slice(ev0).some(e => e.k === 'toast' && /Not enough cash/.test(e.txt || '')), 'quick fix: the refusal is spoken, not silent (F33)');
+  p.money = 100;
+  sim.step(1 / 60, IN({ interactPressed: true }));
+  ok(S.channel && S.channel.kind === 'quickfix', 'quick fix: with the cash the channel starts (F33)');
+}
+{
+  // (iii) a baton swing lands point-blank; the gun keeps its minimum range
+  const mkGuard = (S) => {
+    S.guards = [{ x: 0.6, z: 0, ang: 0, hp: 70, fireCd: 99, down: false, aggro: false, counted: false, neutral: false, fig: null, swing: 0 }];
+    return S.guards[0];
+  };
+  const sim = mkSim(); const S = sim.S; const p = S.player;
+  const g = mkGuard(S);
+  p.mode = 'foot'; p.weapon = 'baton'; p.fireCd = 0; p.reloadT = 0;
+  p.x = 0; p.z = 0;
+  S.camYaw = Math.atan2(g.x - p.x, g.z - p.z);
+  sim.step(1 / 60, IN({ fire: true }));
+  eq(g.hp, 30, 'baton: a point-blank swing connects (F33)');
+  const sim2 = mkSim(); const S2 = sim2.S; const p2 = S2.player;
+  const g2 = mkGuard(S2);
+  p2.mode = 'foot'; p2.weapon = 'sidearm'; p2.fireCd = 0; p2.reloadT = 0; p2.clip = 12;
+  p2.x = 0; p2.z = 0;
+  S2.camYaw = Math.atan2(g2.x - p2.x, g2.z - p2.z);
+  sim2.step(1 / 60, IN({ fire: true }));
+  eq(g2.hp, 70, 'baton: the sidearm still refuses point-blank targets (F33)');
+}
+
+// ---- round 6: dispatch is deterministic — twin sims roll out identical units ----
+{
+  const a = mkSim(), b = mkSim();
+  for (const sim of [a, b]) {
+    const S = sim.S; const p = S.player; const car = S.cars[0];
+    for (const c of S.cars) if (c.driver) { c.driver = false; c.parked = true; } // empty streets: no traffic dice in the chase
+    car.x = 0; car.z = -100; car.ang = 0; car.parked = false; car.speed = 10;
+    p.mode = 'car'; p.carId = 0; p.x = 0; p.z = -100; p.ang = 0; p.hp = 1e6; p.armour = 100;
+    S.wanted.ledger = 6; S.wanted.episode = true; S.wanted.search = 1; // 3 stars
+  }
+  for (let i = 0; i < 60 * 20; i++) { a.step(1 / 60, IN({ moveZ: 1 })); b.step(1 / 60, IN({ moveZ: 1 })); }
+  const ua = a.S.policeCars.filter(u => u.active), ub = b.S.policeCars.filter(u => u.active);
+  ok(ua.length > 0, 'dispatch: units did roll out');
+  eq(ua.length, ub.length, 'dispatch: twin sims field the same number of units');
+  ok(ua.every((u, i) => u.x === ub[i].x && u.z === ub[i].z && u.role === ub[i].role), 'dispatch: twin sims place identical units in identical roles');
+  const fa = a.S.policeFoot.filter(u => u.active), fb = b.S.policeFoot.filter(u => u.active);
+  eq(fa.length, fb.length, 'dispatch: twin sims field the same number of foot units');
+  ok(fa.every((u, i) => u.x === fb[i].x && u.z === fb[i].z), 'dispatch: twin foot units match too');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
